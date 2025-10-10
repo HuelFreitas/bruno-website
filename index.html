@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>B&amp;B Educacão - Fiscalização Marítima</title>
+    <link rel="stylesheet" href="./assets/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand__logo" aria-hidden="true">🐾</span>
+        <div>
+          <p class="brand__title">B&amp;B Educacão</p>
+          <p class="brand__subtitle">Fiscalização Marítima com Cães Farejadores</p>
+        </div>
+      </div>
+      <nav class="topbar__actions" aria-label="Ações do sistema">
+        <button id="themeToggle" class="ghost-button" type="button">Tema</button>
+        <button id="logoutButton" class="ghost-button" type="button" hidden>Sair</button>
+      </nav>
+    </header>
+
+    <main id="app" class="app" tabindex="-1"></main>
+
+    <footer class="footer">
+      <p>&copy; <span id="year"></span> B&amp;B Educacão. Todos os direitos reservados.</p>
+    </footer>
+
+    <script type="module" src="./assets/app.js"></script>
+  </body>
+</html>
