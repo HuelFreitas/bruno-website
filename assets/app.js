@@ -4,6 +4,19 @@ const THEME_KEY = "guardcan:theme";
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
+function escapeHtml(value) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 const defaultState = {
   users: [
     {
@@ -436,13 +449,24 @@ function showRequestModal(request, viewer) {
   const assignedOperator = request.assignedOperatorId
     ? state.users.find((user) => user.id === request.assignedOperatorId)
     : null;
+  const client = resolveUser(request.clientId);
+
+  const safeRequestIdBadge = escapeHtml(request.id.toUpperCase());
+  const safeTitle = escapeHtml(request.title);
+  const safePort = escapeHtml(request.port);
+  const safeVessel = escapeHtml(request.vessel);
+  const safeDescription = escapeHtml(request.description);
+  const safeClientName = escapeHtml(client.name);
+  const safeOperatorName = assignedOperator
+    ? escapeHtml(assignedOperator.name)
+    : "";
 
   dialog.innerHTML = `
     <div class="modal__header">
       <div>
-        <p class="badge">${request.id.toUpperCase()}</p>
-        <h3>${request.title}</h3>
-        <p>${request.port} • ${request.vessel}</p>
+        <p class="badge">${safeRequestIdBadge}</p>
+        <h3>${safeTitle}</h3>
+        <p>${safePort} • ${safeVessel}</p>
       </div>
       <div>
         ${buildStatusChip(request.status)}
@@ -451,11 +475,11 @@ function showRequestModal(request, viewer) {
     <div class="modal__body">
       <section aria-label="Detalhes da operação">
         <h4>Detalhes gerais</h4>
-        <p><strong>Cliente:</strong> ${resolveUser(request.clientId).name}</p>
-        ${assignedOperator ? `<p><strong>Operador:</strong> ${assignedOperator.name}</p>` : ""}
+        <p><strong>Cliente:</strong> ${safeClientName}</p>
+        ${assignedOperator ? `<p><strong>Operador:</strong> ${safeOperatorName}</p>` : ""}
         <p><strong>Data prevista:</strong> ${formatDate(request.scheduledFor)}</p>
-        <p><strong>Descrição:</strong> ${request.description}</p>
-        ${request.tags?.length ? `<div class="tag-list">${request.tags.map((tag) => `<span class="tag">${tag}</span>`).join("")}</div>` : ""}
+        <p><strong>Descrição:</strong> ${safeDescription}</p>
+        ${request.tags?.length ? `<div class="tag-list">${request.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}</div>` : ""}
       </section>
       <section aria-label="Linha do tempo" class="timeline-section">
         <h4>Histórico</h4>
@@ -762,18 +786,23 @@ function buildRequestTable(requests, filter, viewer) {
         <tbody>
           ${filtered
             .map((request) => {
-              const operator = request.assignedOperatorId ? resolveUser(request.assignedOperatorId)?.name : "-";
+              const operatorName = request.assignedOperatorId ? resolveUser(request.assignedOperatorId)?.name : "-";
+              const safeTitle = escapeHtml(request.title);
+              const safePort = escapeHtml(request.port);
+              const safeOperator = escapeHtml(operatorName || "-");
+              const safeRequestId = escapeHtml(request.id);
+
               return `
                 <tr>
                   <td>
-                    <strong>${request.title}</strong>
-                    <p>${request.port}</p>
+                    <strong>${safeTitle}</strong>
+                    <p>${safePort}</p>
                   </td>
                   <td>${formatDate(request.scheduledFor)}</td>
                   <td>${buildStatusChip(request.status)}</td>
-                  <td>${operator || "-"}</td>
+                  <td>${safeOperator}</td>
                   <td>
-                    <button class="secondary-button" type="button" data-request="${request.id}">Detalhes</button>
+                    <button class="secondary-button" type="button" data-request="${safeRequestId}">Detalhes</button>
                   </td>
                 </tr>
               `;
@@ -789,19 +818,29 @@ function buildOperatorBoard(requests, viewer) {
   return `
     <div class="section-grid">
       ${requests
-        .map((request) => `
-          <article class="card" aria-label="${request.title}">
-            <header>
-              <p class="badge">${request.id.toUpperCase()}</p>
-              <h3>${request.title}</h3>
-              <p>${request.port} • ${request.vessel}</p>
-            </header>
-            <p><strong>Cliente:</strong> ${resolveUser(request.clientId).name}</p>
-            <p><strong>Agenda:</strong> ${formatDate(request.scheduledFor)}</p>
-            <p><strong>Status:</strong> ${translateStatus(request.status)}</p>
-            <button class="primary-button" type="button" data-request="${request.id}">${request.status === "completed" ? "Visualizar relatório" : "Atualizar missão"}</button>
-          </article>
-        `)
+        .map((request) => {
+          const client = resolveUser(request.clientId);
+          const safeTitle = escapeHtml(request.title);
+          const safeBadgeId = escapeHtml(request.id.toUpperCase());
+          const safePort = escapeHtml(request.port);
+          const safeVessel = escapeHtml(request.vessel);
+          const safeClientName = escapeHtml(client.name);
+          const safeRequestId = escapeHtml(request.id);
+
+          return `
+            <article class="card" aria-label="${safeTitle}">
+              <header>
+                <p class="badge">${safeBadgeId}</p>
+                <h3>${safeTitle}</h3>
+                <p>${safePort} • ${safeVessel}</p>
+              </header>
+              <p><strong>Cliente:</strong> ${safeClientName}</p>
+              <p><strong>Agenda:</strong> ${formatDate(request.scheduledFor)}</p>
+              <p><strong>Status:</strong> ${translateStatus(request.status)}</p>
+              <button class="primary-button" type="button" data-request="${safeRequestId}">${request.status === "completed" ? "Visualizar relatório" : "Atualizar missão"}</button>
+            </article>
+          `;
+        })
         .join("")}
     </div>
   `;
@@ -846,10 +885,12 @@ function timelineItem(event) {
   return `
     <article class="timeline__item">
       <header>
-        <strong>${event.title}</strong>
+        <strong>${escapeHtml(event.title)}</strong>
       </header>
-      <p>${event.description}</p>
-      <p class="timeline__meta">${formatDate(event.timestamp)} • ${event.actor?.name || "Usuário"}</p>
+      <p>${escapeHtml(event.description)}</p>
+      <p class="timeline__meta">${formatDate(event.timestamp)} • ${escapeHtml(
+        event.actor?.name || "Usuário"
+      )}</p>
     </article>
   `;
 }
@@ -911,81 +952,95 @@ function exportReport(request) {
   const client = resolveUser(request.clientId);
   const operator = resolveUser(request.report.operatorId || request.assignedOperatorId);
 
+  const safeReportId = escapeHtml(request.id.toUpperCase());
+  const safeRequestTitle = escapeHtml(request.title);
+  const safeReportSummary = escapeHtml(request.report.summary);
+  const safeReportFindings = escapeHtml(request.report.findings);
+  const safeReportRecommendations = escapeHtml(request.report.recommendations);
+  const safeClientName = escapeHtml(client.name);
+  const safeOperatorName = escapeHtml(operator.name);
+  const safePort = escapeHtml(request.port);
+  const safeVessel = escapeHtml(request.vessel);
+
   const popup = window.open("", "_blank");
   if (!popup) {
     alert("Permita pop-ups para gerar o relatório.");
     return;
   }
 
-  popup.document.write(`
-    <!DOCTYPE html>
-    <html lang="pt-BR">
-      <head>
-        <meta charset="utf-8" />
-        <title>Relatório ${request.id.toUpperCase()}</title>
-        <style>
-          body { font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }
-          header { border-bottom: 2px solid #1d4ed8; padding-bottom: 1rem; margin-bottom: 2rem; }
-          h1 { margin: 0; }
-          section { margin-bottom: 1.5rem; }
-          .meta { color: #475569; }
-          .timeline { border-left: 2px solid #1d4ed8; padding-left: 1rem; }
-          .timeline article { margin-bottom: 1rem; }
-          footer { margin-top: 3rem; font-size: 0.9rem; color: #475569; }
-        </style>
-      </head>
-      <body>
-        <header>
-          <h1>Relatório B&amp;B Educacão - ${request.title}</h1>
-          <p class="meta">Código ${request.id.toUpperCase()} • ${formatDate(request.report.generatedAt)}</p>
-        </header>
-        <section>
-          <h2>Resumo executivo</h2>
-          <p>${request.report.summary}</p>
-        </section>
-        <section>
-          <h2>Achados / Ocorrências</h2>
-          <p>${request.report.findings}</p>
-        </section>
-        <section>
-          <h2>Recomendações</h2>
-          <p>${request.report.recommendations}</p>
-        </section>
-        <section>
-          <h2>Dados da operação</h2>
-          <p><strong>Cliente:</strong> ${client.name}</p>
-          <p><strong>Operador responsável:</strong> ${operator.name}</p>
-          <p><strong>Porto:</strong> ${request.port}</p>
-          <p><strong>Embarcação:</strong> ${request.vessel}</p>
-          <p><strong>Data prevista:</strong> ${formatDate(request.scheduledFor)}</p>
-        </section>
-        <section>
-          <h2>Linha do tempo</h2>
-          <div class="timeline">
-            ${request.timeline
-              .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
-              .map(
-                (event) => `
-                  <article>
-                    <strong>${event.title}</strong>
-                    <p class="meta">${formatDate(event.timestamp)} • ${event.actor?.name || "Usuário"}</p>
-                    <p>${event.description}</p>
-                  </article>
-                `
-              )
-              .join("")}
-          </div>
-        </section>
-        <footer>
-          <p>B&amp;B Educacão • Fiscalização marítima com cães farejadores • Relatório gerado automaticamente pelo portal.</p>
-        </footer>
-      </body>
-    </html>
-  `);
-  popup.document.close();
-  popup.focus();
-  popup.print();
-}
+    popup.document.write(`
+      <!DOCTYPE html>
+      <html lang="pt-BR">
+        <head>
+          <meta charset="utf-8" />
+          <title>Relatório ${safeReportId}</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }
+            header { border-bottom: 2px solid #1d4ed8; padding-bottom: 1rem; margin-bottom: 2rem; }
+            h1 { margin: 0; }
+            section { margin-bottom: 1.5rem; }
+            .meta { color: #475569; }
+            .timeline { border-left: 2px solid #1d4ed8; padding-left: 1rem; }
+            .timeline article { margin-bottom: 1rem; }
+            footer { margin-top: 3rem; font-size: 0.9rem; color: #475569; }
+          </style>
+        </head>
+        <body>
+          <header>
+            <h1>Relatório B&amp;B Educacão - ${safeRequestTitle}</h1>
+            <p class="meta">Código ${safeReportId} • ${formatDate(request.report.generatedAt)}</p>
+          </header>
+          <section>
+            <h2>Resumo executivo</h2>
+            <p>${safeReportSummary}</p>
+          </section>
+          <section>
+            <h2>Achados / Ocorrências</h2>
+            <p>${safeReportFindings}</p>
+          </section>
+          <section>
+            <h2>Recomendações</h2>
+            <p>${safeReportRecommendations}</p>
+          </section>
+          <section>
+            <h2>Dados da operação</h2>
+            <p><strong>Cliente:</strong> ${safeClientName}</p>
+            <p><strong>Operador responsável:</strong> ${safeOperatorName}</p>
+            <p><strong>Porto:</strong> ${safePort}</p>
+            <p><strong>Embarcação:</strong> ${safeVessel}</p>
+            <p><strong>Data prevista:</strong> ${formatDate(request.scheduledFor)}</p>
+          </section>
+          <section>
+            <h2>Linha do tempo</h2>
+            <div class="timeline">
+              ${request.timeline
+                .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+                .map((event) => {
+                  const safeEventTitle = escapeHtml(event.title);
+                  const safeEventActor = escapeHtml(event.actor?.name || "Usuário");
+                  const safeEventDescription = escapeHtml(event.description);
+
+                  return `
+                    <article>
+                      <strong>${safeEventTitle}</strong>
+                      <p class="meta">${formatDate(event.timestamp)} • ${safeEventActor}</p>
+                      <p>${safeEventDescription}</p>
+                    </article>
+                  `;
+                })
+                .join("")}
+            </div>
+          </section>
+          <footer>
+            <p>B&amp;B Educacão • Fiscalização marítima com cães farejadores • Relatório gerado automaticamente pelo portal.</p>
+          </footer>
+        </body>
+      </html>
+    `);
+    popup.document.close();
+    popup.focus();
+    popup.print();
+  }
 
 function handleLogout() {
   session = null;
