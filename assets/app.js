@@ -958,6 +958,7 @@ function handleRequestDelete(request, dialog) {
   }
 
   dialog.close();
+  renderApp();
   announce("Solicitação removida. A equipe será notificada.");
 }
 
