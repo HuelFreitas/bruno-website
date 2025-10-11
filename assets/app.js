@@ -120,6 +120,10 @@ const app = document.querySelector("#app");
 const logoutButton = document.querySelector("#logoutButton");
 const themeToggle = document.querySelector("#themeToggle");
 const yearLabel = document.querySelector("#year");
+const userInfo = document.querySelector("#userInfo");
+const userName = document.querySelector("#userName");
+const userRole = document.querySelector("#userRole");
+const userAvatar = document.querySelector("#userAvatar");
 
 const state = loadState();
 let session = loadSession();
@@ -137,11 +141,15 @@ if (yearLabel) {
 themeToggle?.addEventListener("click", toggleTheme);
 logoutButton?.addEventListener("click", handleLogout);
 
+// Garantir que o botão sair esteja escondido na inicialização
+logoutButton.hidden = true;
+
 renderApp();
 
 function renderApp() {
   if (!session?.currentUserId) {
     logoutButton.hidden = true;
+    hideUserInfo();
     renderLogin();
     return;
   }
@@ -155,6 +163,7 @@ function renderApp() {
   }
 
   logoutButton.hidden = false;
+  updateUserInfo(currentUser);
 
   if (currentUser.role === "client") {
     renderClientDashboard(currentUser);
@@ -326,7 +335,7 @@ function renderClientDashboard(user) {
         </div>
         <div>
           <label for="requestDate">Data prevista</label>
-          <input id="requestDate" name="scheduledFor" type="date" required />
+          <input id="requestDate" name="scheduledFor" type="date" required min="${new Date().toISOString().split('T')[0]}" />
         </div>
         <div>
           <label for="requestTime">Horário disponível</label>
@@ -370,6 +379,16 @@ function renderClientDashboard(user) {
       </ul>
     </section>
 
+    ${createSearchInterface()}
+
+    <section class="card" aria-labelledby="calendar-heading">
+      <div class="card__header">
+        <h2 id="calendar-heading">Calendário de Operações</h2>
+        <p>Visualize todas as inspeções agendadas em formato de calendário.</p>
+      </div>
+      <div id="calendarContainer"></div>
+    </section>
+
     <section class="card" aria-labelledby="requests-heading">
       <div class="card__header">
         <div>
@@ -399,6 +418,14 @@ function renderClientDashboard(user) {
   });
 
   attachRequestModalHandlers(user);
+  
+  // Inicializar calendário
+  initializeCalendar(requests, user);
+  
+  // Inicializar busca avançada (com delay para garantir que o DOM esteja pronto)
+  setTimeout(() => {
+    initializeSearch();
+  }, 100);
 }
 
 function renderOperatorDashboard(user) {
@@ -431,6 +458,32 @@ function handleCreateRequest(event, user) {
   const scheduledDate = typeof data.get("scheduledFor") === "string" ? data.get("scheduledFor") : "";
   const scheduledTime = typeof data.get("scheduledTime") === "string" ? data.get("scheduledTime") : "";
   const scheduledFor = combineDateTime(scheduledDate, scheduledTime);
+
+  // Validação de data
+  if (scheduledDate && scheduledTime) {
+    const scheduledDateTime = new Date(scheduledFor);
+    const now = new Date();
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(0, 0, 0, 0);
+
+    if (scheduledDateTime < now) {
+      showErrorNotification(
+        "Data inválida",
+        "Não é possível agendar inspeções no passado. Selecione uma data futura.",
+        6000
+      );
+      return;
+    }
+
+    if (scheduledDateTime < tomorrow) {
+      showWarningNotification(
+        "Atenção",
+        "Você está agendando para hoje. Certifique-se de que há tempo suficiente para preparação.",
+        5000
+      );
+    }
+  }
   const request = {
     id: uid("req"),
     clientId: user.id,
@@ -475,6 +528,11 @@ function handleCreateRequest(event, user) {
   form.querySelector("input, select, textarea")?.focus();
   renderClientDashboard(user);
   announce("Solicitação registrada com sucesso.");
+  showSuccessNotification(
+    "Solicitação criada!",
+    `Inspeção "${request.title}" foi registrada com sucesso. ID: ${request.id.toUpperCase()}`,
+    6000
+  );
 }
 
 function attachRequestModalHandlers(user) {
@@ -548,6 +606,7 @@ function showRequestModal(request, viewer) {
         </div>
       </section>
       ${viewer.role === "operator" ? operatorActions(request, viewer) : clientActions(request, viewer)}
+      ${createUploadArea(request.id)}
     </div>
     <div class="modal__footer">
       ${request.report ? `<button class="secondary-button" type="button" data-export>Gerar relatório</button>` : ""}
@@ -585,13 +644,16 @@ function showRequestModal(request, viewer) {
   }
 
   dialog.querySelector("[data-export]")?.addEventListener("click", () => exportReport(request));
+
+  // Inicializar sistema de upload
+  initializeUploadArea(request.id, request);
 }
 
 function operatorActions(request, viewer) {
   const isAssignedToViewer = request.assignedOperatorId === viewer.id;
   return `
     <section aria-label="Ações do operador" class="grid-two">
-      <div class="card" style="box-shadow:none; border:1px solid var(--border);">
+      <div class="card" style="box-shadow:none; border:1px solid var(--border); background: var(--surface-alt);">
         <h4>Atualizar status</h4>
         <form id="statusForm">
           <div>
@@ -609,7 +671,7 @@ function operatorActions(request, viewer) {
           <button class="primary-button" type="submit">Salvar status</button>
         </form>
       </div>
-      <div class="card" style="box-shadow:none; border:1px solid var(--border);">
+      <div class="card" style="box-shadow:none; border:1px solid var(--border); background: var(--surface-alt);">
         <h4>Registrar checkpoint</h4>
         <form id="progressForm">
           <div>
@@ -628,7 +690,7 @@ function operatorActions(request, viewer) {
         </form>
       </div>
     </section>
-    <section class="card" style="box-shadow:none; border:1px solid var(--border);" aria-label="Relatório final">
+    <section class="card" style="box-shadow:none; border:1px solid var(--border); background: var(--surface-alt);" aria-label="Relatório final">
       <h4>Relatório de conclusão</h4>
       <form id="reportForm">
         <div>
@@ -662,7 +724,7 @@ function clientActions(request, viewer) {
   const safeDescription = escapeHtml(request.description);
 
   return `
-    <section aria-label="Observações do cliente" class="card" style="box-shadow:none; border:1px solid var(--border);">
+    <section aria-label="Observações do cliente" class="card" style="box-shadow:none; border:1px solid var(--border); background: var(--surface-alt);">
       <h4>Complementar informações</h4>
       <form id="clientNoteForm">
         <label for="clientNote">Mensagem para a equipe B&amp;B Educacão</label>
@@ -670,7 +732,7 @@ function clientActions(request, viewer) {
         <button class="secondary-button" type="submit">Enviar mensagem</button>
       </form>
     </section>
-    <section aria-label="Gerenciar solicitação" class="card" style="box-shadow:none; border:1px solid var(--border);">
+    <section aria-label="Gerenciar solicitação" class="card" style="box-shadow:none; border:1px solid var(--border); background: var(--surface-alt);">
       <h4>Gerenciar solicitação</h4>
       <p>Atualize detalhes importantes ou cancele a inspeção quando necessário.</p>
       <button class="secondary-button" type="button" data-toggle-edit>Editar solicitação</button>
@@ -693,7 +755,7 @@ function clientActions(request, viewer) {
         </div>
         <div>
           <label for="editDate">Data prevista</label>
-          <input id="editDate" name="scheduledFor" type="date" required value="${dateValue}" />
+          <input id="editDate" name="scheduledFor" type="date" required value="${dateValue}" min="${new Date().toISOString().split('T')[0]}" />
         </div>
         <div>
           <label for="editTime">Horário disponível</label>
@@ -758,6 +820,11 @@ function handleStatusUpdate(event, request, operator, dialog) {
   if (timeline) timeline.insertAdjacentHTML("afterbegin", timelineItem(entry));
   renderApp();
   announce("Status atualizado com sucesso.");
+  showSuccessNotification(
+    "Status atualizado!",
+    `Solicitação ${request.id.toUpperCase()} agora está: ${translateStatus(status)}`,
+    4000
+  );
 }
 
 function handleProgressUpdate(event, request, operator, dialog) {
@@ -785,6 +852,11 @@ function handleProgressUpdate(event, request, operator, dialog) {
   const timeline = dialog.querySelector(".timeline");
   if (timeline) timeline.insertAdjacentHTML("afterbegin", timelineItem(entry));
   announce("Checkpoint registrado.");
+  showInfoNotification(
+    "Checkpoint registrado!",
+    `Nova atualização adicionada à solicitação ${request.id.toUpperCase()}`,
+    4000
+  );
   renderApp();
 }
 
@@ -823,6 +895,11 @@ function handleReportSubmission(event, request, operator, dialog) {
   saveState();
   dialog.close();
   announce("Relatório final salvo e missão concluída.");
+  showSuccessNotification(
+    "Missão concluída!",
+    `Relatório final da solicitação ${request.id.toUpperCase()} foi enviado com sucesso`,
+    6000
+  );
 }
 
 function handleClientNote(event, request, client, dialog) {
@@ -889,6 +966,32 @@ function handleRequestEdit(event, request, client, dialog, toggleButton, formCon
   const scheduledTimeValue = typeof data.get("scheduledTime") === "string" ? data.get("scheduledTime") : "";
   const scheduledFor = combineDateTime(scheduledDateValue, scheduledTimeValue);
   const tags = parseTags(data.get("tags"));
+
+  // Validação de data na edição
+  if (scheduledDateValue && scheduledTimeValue) {
+    const scheduledDateTime = new Date(scheduledFor);
+    const now = new Date();
+    const originalDateTime = new Date(request.scheduledFor);
+
+    if (scheduledDateTime < now) {
+      showErrorNotification(
+        "Data inválida",
+        "Não é possível agendar inspeções no passado. Selecione uma data futura.",
+        6000
+      );
+      return;
+    }
+
+    // Aviso se a data foi alterada significativamente
+    const diffHours = Math.abs(scheduledDateTime - originalDateTime) / (1000 * 60 * 60);
+    if (diffHours > 24) {
+      showWarningNotification(
+        "Data alterada",
+        `A data da inspeção foi alterada de ${formatDate(originalDateTime)} para ${formatDate(scheduledDateTime)}`,
+        5000
+      );
+    }
+  }
 
   if (!title || !port || !vessel || !description || !scheduledFor) {
     announce("Preencha todos os campos obrigatórios antes de salvar.");
@@ -960,6 +1063,11 @@ function handleRequestDelete(request, dialog) {
   dialog.close();
   renderApp();
   announce("Solicitação removida. A equipe será notificada.");
+  showWarningNotification(
+    "Solicitação removida",
+    `A solicitação ${request.id.toUpperCase()} foi excluída permanentemente`,
+    5000
+  );
 }
 
 function buildMetrics(requests) {
@@ -1251,102 +1359,154 @@ function resolveUser(id) {
 
 function exportReport(request) {
   if (!request.report) return;
-  const client = resolveUser(request.clientId);
-  const operator = resolveUser(request.report.operatorId || request.assignedOperatorId);
-
-  const safeReportId = escapeHtml(request.id.toUpperCase());
-  const safeRequestTitle = escapeHtml(request.title);
-  const safeReportSummary = escapeHtml(request.report.summary);
-  const safeReportFindings = escapeHtml(request.report.findings);
-  const safeReportRecommendations = escapeHtml(request.report.recommendations);
-  const safeClientName = escapeHtml(client.name);
-  const safeOperatorName = escapeHtml(operator.name);
-  const safePort = escapeHtml(request.port);
-  const safeVessel = escapeHtml(request.vessel);
-
-  const popup = window.open("", "_blank");
-  if (!popup) {
-    alert("Permita pop-ups para gerar o relatório.");
+  
+  // Verificar se jsPDF está disponível
+  if (typeof window.jsPDF === 'undefined') {
+    showErrorNotification(
+      "Biblioteca não carregada",
+      "A biblioteca PDF não foi carregada. Tente novamente em alguns segundos.",
+      5000
+    );
     return;
   }
 
-    popup.document.write(`
-      <!DOCTYPE html>
-      <html lang="pt-BR">
-        <head>
-          <meta charset="utf-8" />
-          <title>Relatório ${safeReportId}</title>
-          <style>
-            body { font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }
-            header { border-bottom: 2px solid #1d4ed8; padding-bottom: 1rem; margin-bottom: 2rem; }
-            h1 { margin: 0; }
-            section { margin-bottom: 1.5rem; }
-            .meta { color: #475569; }
-            .timeline { border-left: 2px solid #1d4ed8; padding-left: 1rem; }
-            .timeline article { margin-bottom: 1rem; }
-            footer { margin-top: 3rem; font-size: 0.9rem; color: #475569; }
-          </style>
-        </head>
-        <body>
-          <header>
-            <h1>Relatório B&amp;B Educacão - ${safeRequestTitle}</h1>
-            <p class="meta">Código ${safeReportId} • ${formatDate(request.report.generatedAt)}</p>
-          </header>
-          <section>
-            <h2>Resumo executivo</h2>
-            <p>${safeReportSummary}</p>
-          </section>
-          <section>
-            <h2>Achados / Ocorrências</h2>
-            <p>${safeReportFindings}</p>
-          </section>
-          <section>
-            <h2>Recomendações</h2>
-            <p>${safeReportRecommendations}</p>
-          </section>
-          <section>
-            <h2>Dados da operação</h2>
-            <p><strong>Cliente:</strong> ${safeClientName}</p>
-            <p><strong>Operador responsável:</strong> ${safeOperatorName}</p>
-            <p><strong>Porto:</strong> ${safePort}</p>
-            <p><strong>Embarcação:</strong> ${safeVessel}</p>
-            <p><strong>Data prevista:</strong> ${formatDate(request.scheduledFor)}</p>
-          </section>
-          <section>
-            <h2>Linha do tempo</h2>
-            <div class="timeline">
-              ${request.timeline
-                .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
-                .map((event) => {
-                  const safeEventTitle = escapeHtml(event.title);
-                  const safeEventActor = escapeHtml(event.actor?.name || "Usuário");
-                  const safeEventDescription = escapeHtml(event.description);
+  const client = resolveUser(request.clientId);
+  const operator = resolveUser(request.report.operatorId || request.assignedOperatorId);
 
-                  return `
-                    <article>
-                      <strong>${safeEventTitle}</strong>
-                      <p class="meta">${formatDate(event.timestamp)} • ${safeEventActor}</p>
-                      <p>${safeEventDescription}</p>
-                    </article>
-                  `;
-                })
-                .join("")}
-            </div>
-          </section>
-          <footer>
-            <p>B&amp;B Educacão • Fiscalização marítima com cães farejadores • Relatório gerado automaticamente pelo portal.</p>
-          </footer>
-        </body>
-      </html>
-    `);
-    popup.document.close();
-    popup.focus();
-    popup.print();
+  try {
+    const { jsPDF } = window.jsPDF;
+    const doc = new jsPDF();
+    
+    // Configurações do documento
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 20;
+    let yPosition = 20;
+    
+    // Função para adicionar texto com quebra de linha
+    const addText = (text, x = margin, y = yPosition, options = {}) => {
+      const lines = doc.splitTextToSize(text, pageWidth - 2 * margin);
+      doc.text(lines, x, y, options);
+      return y + (lines.length * 6) + 5;
+    };
+    
+    // Cabeçalho
+    doc.setFontSize(20);
+    doc.setFont(undefined, 'bold');
+    yPosition = addText(`Relatório B&B Educacão - ${request.title}`, margin, yPosition);
+    
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    yPosition = addText(`Código: ${request.id.toUpperCase()} • ${formatDate(request.report.generatedAt)}`, margin, yPosition);
+    
+    // Linha separadora
+    yPosition += 10;
+    doc.line(margin, yPosition, pageWidth - margin, yPosition);
+    yPosition += 15;
+    
+    // Resumo executivo
+    doc.setFontSize(14);
+    doc.setFont(undefined, 'bold');
+    yPosition = addText('Resumo Executivo', margin, yPosition);
+    
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    yPosition = addText(request.report.summary, margin, yPosition);
+    yPosition += 10;
+    
+    // Achados
+    doc.setFontSize(14);
+    doc.setFont(undefined, 'bold');
+    yPosition = addText('Achados / Ocorrências', margin, yPosition);
+    
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    yPosition = addText(request.report.findings, margin, yPosition);
+    yPosition += 10;
+    
+    // Recomendações
+    doc.setFontSize(14);
+    doc.setFont(undefined, 'bold');
+    yPosition = addText('Recomendações', margin, yPosition);
+    
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    yPosition = addText(request.report.recommendations, margin, yPosition);
+    yPosition += 10;
+    
+    // Dados da operação
+    doc.setFontSize(14);
+    doc.setFont(undefined, 'bold');
+    yPosition = addText('Dados da Operação', margin, yPosition);
+    
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    yPosition = addText(`Cliente: ${client.name}`, margin, yPosition);
+    yPosition = addText(`Operador: ${operator.name}`, margin, yPosition);
+    yPosition = addText(`Porto: ${request.port}`, margin, yPosition);
+    yPosition = addText(`Embarcação: ${request.vessel}`, margin, yPosition);
+    yPosition = addText(`Data: ${formatDate(request.scheduledFor)}`, margin, yPosition);
+    yPosition += 10;
+    
+    // Evidências
+    if (request.evidence && request.evidence.length > 0) {
+      doc.setFontSize(14);
+      doc.setFont(undefined, 'bold');
+      yPosition = addText('Evidências Anexadas', margin, yPosition);
+      
+      doc.setFontSize(10);
+      doc.setFont(undefined, 'normal');
+      request.evidence.forEach(evidence => {
+        yPosition = addText(`• ${evidence.name} (${formatFileSize(evidence.size)})`, margin, yPosition);
+      });
+      yPosition += 10;
+    }
+    
+    // Linha do tempo
+    doc.setFontSize(14);
+    doc.setFont(undefined, 'bold');
+    yPosition = addText('Linha do Tempo', margin, yPosition);
+    
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    const sortedTimeline = request.timeline.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    sortedTimeline.forEach(event => {
+      yPosition = addText(`${formatDate(event.timestamp)} - ${event.title}`, margin, yPosition);
+      yPosition = addText(`Por: ${event.actor?.name || 'Usuário'}`, margin + 10, yPosition);
+      yPosition = addText(event.description, margin + 10, yPosition);
+      yPosition += 5;
+    });
+    
+    // Rodapé
+    const pageHeight = doc.internal.pageSize.getHeight();
+    doc.setFontSize(8);
+    doc.setFont(undefined, 'italic');
+    doc.text('B&B Educacão • Fiscalização marítima com cães farejadores', pageWidth/2, pageHeight - 10, { align: 'center' });
+    
+    // Salvar o PDF
+    const fileName = `relatorio_${request.id}_${new Date().toISOString().split('T')[0]}.pdf`;
+    doc.save(fileName);
+    
+    showSuccessNotification(
+      "PDF gerado!",
+      `Relatório ${request.id.toUpperCase()} foi exportado como PDF`,
+      4000
+    );
+    
+  } catch (error) {
+    console.error('Erro ao gerar PDF:', error);
+    showErrorNotification(
+      "Erro ao gerar PDF",
+      "Ocorreu um erro ao gerar o arquivo PDF. Tente novamente.",
+      5000
+    );
   }
+}
 
 function handleLogout() {
   session = null;
   saveSession();
+  hideUserInfo(); // Limpar informações do usuário
+  logoutButton.hidden = true; // Garantir que o botão sair seja escondido
   renderApp();
   focusMain();
 }
@@ -1410,6 +1570,679 @@ function announce(message) {
   region.textContent = message;
 }
 
+// Sistema de Notificações Visuais
+function showNotification(title, message, type = "info", duration = 5000) {
+  const container = document.getElementById("notificationContainer");
+  if (!container) return;
+
+  const notification = document.createElement("div");
+  notification.className = `notification ${type}`;
+  
+  const icons = {
+    success: "✅",
+    error: "❌", 
+    warning: "⚠️",
+    info: "ℹ️"
+  };
+
+  notification.innerHTML = `
+    <div class="notification__header">
+      <div style="display: flex; align-items: center;">
+        <span class="notification__icon">${icons[type] || icons.info}</span>
+        <h4 class="notification__title">${escapeHtml(title)}</h4>
+      </div>
+      <button class="notification__close" type="button" aria-label="Fechar notificação">×</button>
+    </div>
+    <p class="notification__message">${escapeHtml(message)}</p>
+    <div class="notification__progress"></div>
+  `;
+
+  // Adicionar evento de fechamento
+  const closeButton = notification.querySelector(".notification__close");
+  closeButton.addEventListener("click", () => {
+    hideNotification(notification);
+  });
+
+  container.appendChild(notification);
+
+  // Animar entrada
+  requestAnimationFrame(() => {
+    notification.classList.add("show");
+  });
+
+  // Auto-remover após duração
+  if (duration > 0) {
+    setTimeout(() => {
+      hideNotification(notification);
+    }, duration);
+  }
+
+  return notification;
+}
+
+function hideNotification(notification) {
+  if (!notification || !notification.parentNode) return;
+  
+  notification.classList.remove("show");
+  setTimeout(() => {
+    if (notification.parentNode) {
+      notification.parentNode.removeChild(notification);
+    }
+  }, 300);
+}
+
+// Funções de conveniência para diferentes tipos de notificação
+function showSuccessNotification(title, message, duration = 4000) {
+  return showNotification(title, message, "success", duration);
+}
+
+function showErrorNotification(title, message, duration = 6000) {
+  return showNotification(title, message, "error", duration);
+}
+
+function showWarningNotification(title, message, duration = 5000) {
+  return showNotification(title, message, "warning", duration);
+}
+
+function showInfoNotification(title, message, duration = 4000) {
+  return showNotification(title, message, "info", duration);
+}
+
+// Sistema de Upload de Evidências
+function createUploadArea(requestId) {
+  return `
+    <div class="card" style="box-shadow:none; border:1px solid var(--border); background: var(--surface-alt);" aria-label="Evidências da operação">
+      <h4>Evidências da operação</h4>
+      <p>Adicione fotos, documentos ou outros arquivos relevantes para esta inspeção.</p>
+      
+      <div class="upload-area" id="uploadArea-${requestId}">
+        <input type="file" id="fileInput-${requestId}" multiple accept="image/*,.pdf,.doc,.docx,.txt" />
+        <div class="upload-icon">📁</div>
+        <p class="upload-text">Clique aqui ou arraste arquivos para adicionar evidências</p>
+        <p class="upload-hint">Formatos aceitos: JPG, PNG, PDF, DOC, TXT (máx. 10MB por arquivo)</p>
+      </div>
+      
+      <div class="evidence-gallery" id="evidenceGallery-${requestId}">
+        <!-- Evidências serão inseridas aqui -->
+      </div>
+    </div>
+  `;
+}
+
+function initializeUploadArea(requestId, request) {
+  const uploadArea = document.getElementById(`uploadArea-${requestId}`);
+  const fileInput = document.getElementById(`fileInput-${requestId}`);
+  const gallery = document.getElementById(`evidenceGallery-${requestId}`);
+  
+  if (!uploadArea || !fileInput || !gallery) return;
+
+  // Inicializar evidências existentes
+  if (request.evidence && request.evidence.length > 0) {
+    renderEvidenceGallery(request.evidence, gallery, requestId);
+  }
+
+  // Drag and drop
+  uploadArea.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    uploadArea.classList.add('dragover');
+  });
+
+  uploadArea.addEventListener('dragleave', () => {
+    uploadArea.classList.remove('dragover');
+  });
+
+  uploadArea.addEventListener('drop', (e) => {
+    e.preventDefault();
+    uploadArea.classList.remove('dragover');
+    handleFileUpload(e.dataTransfer.files, requestId);
+  });
+
+  // Click para selecionar arquivos
+  uploadArea.addEventListener('click', () => {
+    fileInput.click();
+  });
+
+  // Mudança no input de arquivo
+  fileInput.addEventListener('change', (e) => {
+    handleFileUpload(e.target.files, requestId);
+    fileInput.value = ''; // Limpar input
+  });
+}
+
+function handleFileUpload(files, requestId) {
+  const request = state.requests.find(r => r.id === requestId);
+  if (!request) return;
+
+  // Inicializar array de evidências se não existir
+  if (!request.evidence) {
+    request.evidence = [];
+  }
+
+  Array.from(files).forEach(file => {
+    // Validar tamanho (10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      showErrorNotification(
+        "Arquivo muito grande",
+        `O arquivo "${file.name}" excede o limite de 10MB`,
+        5000
+      );
+      return;
+    }
+
+    // Validar tipo
+    const allowedTypes = ['image/jpeg', 'image/png', 'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain'];
+    if (!allowedTypes.includes(file.type)) {
+      showErrorNotification(
+        "Tipo de arquivo não permitido",
+        `O arquivo "${file.name}" não é um tipo suportado`,
+        5000
+      );
+      return;
+    }
+
+    // Criar evidência
+    const evidence = {
+      id: uid("evidence"),
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      uploadedAt: new Date().toISOString(),
+      data: null // Será preenchido após leitura
+    };
+
+    // Ler arquivo
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      evidence.data = e.target.result;
+      request.evidence.push(evidence);
+      saveState();
+      renderEvidenceGallery(request.evidence, document.getElementById(`evidenceGallery-${requestId}`), requestId);
+      showSuccessNotification(
+        "Evidência adicionada",
+        `Arquivo "${file.name}" foi adicionado com sucesso`,
+        3000
+      );
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderEvidenceGallery(evidenceList, gallery, requestId) {
+  if (!gallery || !evidenceList) return;
+
+  gallery.innerHTML = evidenceList.map(evidence => {
+    const isImage = evidence.type.startsWith('image/');
+    const fileSize = formatFileSize(evidence.size);
+    
+    return `
+      <div class="evidence-item" data-evidence-id="${evidence.id}">
+        ${isImage ? 
+          `<img src="${evidence.data}" alt="${escapeHtml(evidence.name)}" class="evidence-preview">` :
+          `<div class="file-icon">📄</div>`
+        }
+        <div class="evidence-info">
+          <div class="evidence-name">${escapeHtml(evidence.name)}</div>
+          <div>${fileSize} • ${formatDate(evidence.uploadedAt)}</div>
+        </div>
+        <div class="evidence-actions">
+          ${isImage ? `<button class="evidence-action" onclick="viewEvidence('${evidence.id}')" title="Visualizar">👁️</button>` : ''}
+          <button class="evidence-action danger" onclick="removeEvidence('${evidence.id}', '${requestId}')" title="Remover">🗑️</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function removeEvidence(evidenceId, requestId) {
+  const request = state.requests.find(r => r.id === requestId);
+  if (!request || !request.evidence) return;
+
+  const evidence = request.evidence.find(e => e.id === evidenceId);
+  if (!evidence) return;
+
+  if (confirm(`Tem certeza que deseja remover a evidência "${evidence.name}"?`)) {
+    request.evidence = request.evidence.filter(e => e.id !== evidenceId);
+    saveState();
+    renderEvidenceGallery(request.evidence, document.getElementById(`evidenceGallery-${requestId}`), requestId);
+    showWarningNotification(
+      "Evidência removida",
+      `O arquivo "${evidence.name}" foi removido`,
+      3000
+    );
+  }
+}
+
+function viewEvidence(evidenceId) {
+  const request = state.requests.find(r => r.evidence && r.evidence.find(e => e.id === evidenceId));
+  if (!request) return;
+
+  const evidence = request.evidence.find(e => e.id === evidenceId);
+  if (!evidence || !evidence.type.startsWith('image/')) return;
+
+  // Criar modal para visualizar imagem
+  const modal = document.createElement('dialog');
+  modal.className = 'modal';
+  modal.innerHTML = `
+    <div class="modal__header">
+      <h3>${escapeHtml(evidence.name)}</h3>
+      <button class="notification__close" onclick="this.closest('dialog').close()">×</button>
+    </div>
+    <div class="modal__body">
+      <img src="${evidence.data}" alt="${escapeHtml(evidence.name)}" style="width: 100%; max-height: 70vh; object-fit: contain;">
+      <p style="margin-top: 1rem; color: var(--text-secondary);">
+        Tamanho: ${formatFileSize(evidence.size)} • 
+        Adicionado em: ${formatDate(evidence.uploadedAt)}
+      </p>
+    </div>
+  `;
+  
+  document.body.appendChild(modal);
+  modal.showModal();
+  
+  modal.addEventListener('close', () => {
+    modal.remove();
+  });
+}
+
+function formatFileSize(bytes) {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// Sistema de Calendário Visual
+let currentCalendarDate = new Date();
+
+function createCalendar(requests, user) {
+  const today = new Date();
+  const year = currentCalendarDate.getFullYear();
+  const month = currentCalendarDate.getMonth();
+  
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const startDate = new Date(firstDay);
+  startDate.setDate(startDate.getDate() - firstDay.getDay());
+  
+  const endDate = new Date(lastDay);
+  endDate.setDate(endDate.getDate() + (6 - lastDay.getDay()));
+  
+  const days = [];
+  const currentDate = new Date(startDate);
+  
+  while (currentDate <= endDate) {
+    const dayRequests = requests.filter(request => {
+      const requestDate = new Date(request.scheduledFor);
+      return requestDate.toDateString() === currentDate.toDateString();
+    });
+    
+    days.push({
+      date: new Date(currentDate),
+      requests: dayRequests,
+      isCurrentMonth: currentDate.getMonth() === month,
+      isToday: currentDate.toDateString() === today.toDateString()
+    });
+    
+    currentDate.setDate(currentDate.getDate() + 1);
+  }
+  
+  const monthNames = [
+    'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+    'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+  ];
+  
+  const dayNames = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+  
+  return `
+    <div class="calendar-container">
+      <div class="calendar-header">
+        <h3 class="calendar-title">${monthNames[month]} ${year}</h3>
+        <div class="calendar-nav">
+          <button class="calendar-nav-button" id="prevMonth" type="button" aria-label="Mês anterior">‹</button>
+          <button class="calendar-nav-button" id="nextMonth" type="button" aria-label="Próximo mês">›</button>
+        </div>
+      </div>
+      
+      <div class="calendar-grid">
+        ${dayNames.map(day => `<div class="calendar-day-header">${day}</div>`).join('')}
+        
+        ${days.map(day => {
+          const dayNumber = day.date.getDate();
+          const isOtherMonth = !day.isCurrentMonth;
+          const isToday = day.isToday;
+          const events = day.requests.slice(0, 2);
+          const hasMore = day.requests.length > 2;
+          const moreCount = day.requests.length - 2;
+          
+          return `
+            <div class="calendar-day ${isOtherMonth ? 'other-month' : ''} ${isToday ? 'today' : ''}" 
+                 data-date="${day.date.toISOString().split('T')[0]}">
+              <div class="calendar-day-number">${dayNumber}</div>
+              <div class="calendar-events">
+                ${events.map(request => `
+                  <div class="calendar-event ${request.status}" 
+                       data-request="${request.id}" 
+                       title="${escapeHtml(request.title)}">
+                    ${escapeHtml(request.title.length > 15 ? request.title.substring(0, 15) + '...' : request.title)}
+                  </div>
+                `).join('')}
+                ${hasMore ? `<div class="calendar-event-more">+${moreCount} mais</div>` : ''}
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function initializeCalendar(requests, user) {
+  const calendarContainer = document.getElementById('calendarContainer');
+  if (!calendarContainer) return;
+  
+  calendarContainer.innerHTML = createCalendar(requests, user);
+  
+  // Event listeners para navegação
+  document.getElementById('prevMonth')?.addEventListener('click', () => {
+    currentCalendarDate.setMonth(currentCalendarDate.getMonth() - 1);
+    calendarContainer.innerHTML = createCalendar(requests, user);
+    initializeCalendar(requests, user);
+  });
+  
+  document.getElementById('nextMonth')?.addEventListener('click', () => {
+    currentCalendarDate.setMonth(currentCalendarDate.getMonth() + 1);
+    calendarContainer.innerHTML = createCalendar(requests, user);
+    initializeCalendar(requests, user);
+  });
+  
+  // Event listeners para eventos do calendário
+  calendarContainer.querySelectorAll('.calendar-event').forEach(eventElement => {
+    eventElement.addEventListener('click', () => {
+      const requestId = eventElement.dataset.request;
+      const request = state.requests.find(r => r.id === requestId);
+      if (request) {
+        showRequestModal(request, user);
+      }
+    });
+  });
+}
+
+// Sistema de Busca Avançada
+function createSearchInterface() {
+  return `
+    <div class="search-container">
+      <div class="search-header">
+        <h3 class="search-title">Busca Avançada</h3>
+        <button class="search-toggle" id="toggleSearch" type="button">
+          <span id="searchToggleText">Mostrar filtros</span>
+        </button>
+      </div>
+      
+      <form id="searchForm" class="search-form" hidden>
+        <div class="search-field">
+          <label for="searchText">Texto</label>
+          <input id="searchText" type="text" placeholder="Buscar por título, descrição, porto..." />
+        </div>
+        
+        <div class="search-field">
+          <label for="searchStatus">Status</label>
+          <select id="searchStatus">
+            <option value="">Todos os status</option>
+            <option value="pending">Pendente</option>
+            <option value="in-progress">Em andamento</option>
+            <option value="completed">Concluída</option>
+          </select>
+        </div>
+        
+        <div class="search-field">
+          <label for="searchDateFrom">Data inicial</label>
+          <input id="searchDateFrom" type="date" />
+        </div>
+        
+        <div class="search-field">
+          <label for="searchDateTo">Data final</label>
+          <input id="searchDateTo" type="date" />
+        </div>
+        
+        <div class="search-field">
+          <label for="searchPort">Porto</label>
+          <input id="searchPort" type="text" placeholder="Nome do porto" />
+        </div>
+        
+        <div class="search-field">
+          <label for="searchVessel">Embarcação</label>
+          <input id="searchVessel" type="text" placeholder="Nome da embarcação" />
+        </div>
+        
+        <div class="search-actions">
+          <button type="button" class="ghost-button" id="clearSearch">Limpar</button>
+          <button type="submit" class="primary-button">Buscar</button>
+        </div>
+      </form>
+      
+      <div id="searchResults" class="search-results" hidden>
+        <div class="search-results-header">
+          <span class="search-results-count" id="searchResultsCount"></span>
+          <button class="search-clear" id="clearSearchResults">Limpar resultados</button>
+        </div>
+        <div id="searchResultsList"></div>
+      </div>
+    </div>
+  `;
+}
+
+function initializeSearch() {
+  const searchForm = document.getElementById('searchForm');
+  const toggleButton = document.getElementById('toggleSearch');
+  const toggleText = document.getElementById('searchToggleText');
+  const clearButton = document.getElementById('clearSearch');
+  const clearResultsButton = document.getElementById('clearSearchResults');
+  const searchResults = document.getElementById('searchResults');
+  
+  if (!searchForm || !toggleButton) {
+    console.log('Elementos de busca não encontrados');
+    return;
+  }
+  
+  // Remover event listeners anteriores se existirem
+  const newToggleButton = toggleButton.cloneNode(true);
+  toggleButton.parentNode.replaceChild(newToggleButton, toggleButton);
+  
+  // Toggle do formulário de busca
+  newToggleButton.addEventListener('click', () => {
+    const isHidden = searchForm.hasAttribute('hidden');
+    const currentToggleText = document.getElementById('searchToggleText');
+    
+    if (isHidden) {
+      searchForm.removeAttribute('hidden');
+      if (currentToggleText) currentToggleText.textContent = 'Ocultar filtros';
+      showInfoNotification(
+        "Filtros ativados",
+        "Use os filtros para encontrar solicitações específicas",
+        3000
+      );
+    } else {
+      searchForm.setAttribute('hidden', '');
+      if (currentToggleText) currentToggleText.textContent = 'Mostrar filtros';
+    }
+  });
+  
+  // Limpar busca
+  clearButton?.addEventListener('click', () => {
+    searchForm.reset();
+    if (searchResults) searchResults.setAttribute('hidden', '');
+    showInfoNotification(
+      "Filtros limpos",
+      "Todos os filtros foram removidos",
+      2000
+    );
+  });
+  
+  clearResultsButton?.addEventListener('click', () => {
+    if (searchResults) searchResults.setAttribute('hidden', '');
+    searchForm.reset();
+    showInfoNotification(
+      "Resultados limpos",
+      "Busca cancelada e filtros limpos",
+      2000
+    );
+  });
+  
+  // Submissão da busca
+  searchForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    performSearch();
+  });
+  
+  console.log('Sistema de busca inicializado com sucesso');
+}
+
+function performSearch() {
+  const searchText = document.getElementById('searchText')?.value || '';
+  const searchStatus = document.getElementById('searchStatus')?.value || '';
+  const searchDateFrom = document.getElementById('searchDateFrom')?.value || '';
+  const searchDateTo = document.getElementById('searchDateTo')?.value || '';
+  const searchPort = document.getElementById('searchPort')?.value || '';
+  const searchVessel = document.getElementById('searchVessel')?.value || '';
+  
+  const currentUser = state.users.find(user => user.id === session?.currentUserId);
+  if (!currentUser) return;
+  
+  let filteredRequests = state.requests;
+  
+  // Filtrar por usuário
+  if (currentUser.role === 'client') {
+    filteredRequests = filteredRequests.filter(request => request.clientId === currentUser.id);
+  }
+  
+  // Aplicar filtros
+  if (searchText) {
+    const searchLower = searchText.toLowerCase();
+    filteredRequests = filteredRequests.filter(request => 
+      request.title.toLowerCase().includes(searchLower) ||
+      request.description.toLowerCase().includes(searchLower) ||
+      request.port.toLowerCase().includes(searchLower)
+    );
+  }
+  
+  if (searchStatus) {
+    filteredRequests = filteredRequests.filter(request => request.status === searchStatus);
+  }
+  
+  if (searchDateFrom) {
+    const fromDate = new Date(searchDateFrom);
+    filteredRequests = filteredRequests.filter(request => 
+      new Date(request.scheduledFor) >= fromDate
+    );
+  }
+  
+  if (searchDateTo) {
+    const toDate = new Date(searchDateTo);
+    toDate.setHours(23, 59, 59, 999);
+    filteredRequests = filteredRequests.filter(request => 
+      new Date(request.scheduledFor) <= toDate
+    );
+  }
+  
+  if (searchPort) {
+    const portLower = searchPort.toLowerCase();
+    filteredRequests = filteredRequests.filter(request => 
+      request.port.toLowerCase().includes(portLower)
+    );
+  }
+  
+  if (searchVessel) {
+    const vesselLower = searchVessel.toLowerCase();
+    filteredRequests = filteredRequests.filter(request => 
+      request.vessel.toLowerCase().includes(vesselLower)
+    );
+  }
+  
+  // Exibir resultados
+  displaySearchResults(filteredRequests, currentUser);
+  
+  // Notificação de busca realizada
+  showSuccessNotification(
+    "Busca realizada",
+    `Encontrados ${filteredRequests.length} resultado(s)`,
+    3000
+  );
+}
+
+function displaySearchResults(requests, user) {
+  const searchResults = document.getElementById('searchResults');
+  const searchResultsCount = document.getElementById('searchResultsCount');
+  const searchResultsList = document.getElementById('searchResultsList');
+  
+  if (!searchResults || !searchResultsCount || !searchResultsList) return;
+  
+  searchResults.removeAttribute('hidden');
+  searchResultsCount.textContent = `${requests.length} resultado(s) encontrado(s)`;
+  
+  if (requests.length === 0) {
+    searchResultsList.innerHTML = `
+      <div class="empty-state">
+        <h3>Nenhum resultado encontrado</h3>
+        <p>Tente ajustar os filtros de busca.</p>
+      </div>
+    `;
+    return;
+  }
+  
+  searchResultsList.innerHTML = `
+    <div class="table-wrapper">
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">Título</th>
+            <th scope="col">Data prevista</th>
+            <th scope="col">Status</th>
+            <th scope="col">Porto</th>
+            <th scope="col">Embarcação</th>
+            <th scope="col"><span class="sr-only">Ações</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${requests.map(request => {
+            const operatorName = request.assignedOperatorId ? resolveUser(request.assignedOperatorId)?.name : "-";
+            const safeTitle = escapeHtml(request.title);
+            const safePort = escapeHtml(request.port);
+            const safeVessel = escapeHtml(request.vessel);
+            const safeRequestId = escapeHtml(request.id);
+            
+            return `
+              <tr>
+                <td>
+                  <strong>${safeTitle}</strong>
+                </td>
+                <td>${formatDate(request.scheduledFor)}</td>
+                <td>${buildStatusChip(request.status)}</td>
+                <td>${safePort}</td>
+                <td>${safeVessel}</td>
+                <td>
+                  <button class="secondary-button" type="button" data-request="${safeRequestId}">Detalhes</button>
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+  
+  // Adicionar event listeners para os botões de detalhes
+  searchResultsList.querySelectorAll('[data-request]').forEach(button => {
+    button.addEventListener('click', () => {
+      const requestId = button.dataset.request;
+      const request = state.requests.find(r => r.id === requestId);
+      if (request) {
+        showRequestModal(request, user);
+      }
+    });
+  });
+}
+
 function focusMain() {
   requestAnimationFrame(() => {
     app?.focus();
@@ -1439,4 +2272,51 @@ function toggleTheme() {
 function updateThemeToggleLabel(theme) {
   if (!themeToggle) return;
   themeToggle.textContent = theme === "dark" ? "Modo claro" : "Modo escuro";
+}
+
+// Função para atualizar informações do usuário no header
+function updateUserInfo(user) {
+  if (!user || !userInfo || !userName || !userRole || !userAvatar) return;
+
+  // Mostrar informações do usuário
+  userInfo.hidden = false;
+  
+  // Atualizar nome
+  userName.textContent = user.name;
+  
+  // Atualizar role com texto mais amigável
+  const roleText = user.role === "client" ? "Cliente" : "Operador";
+  userRole.textContent = roleText;
+  
+  // Atualizar avatar baseado no role
+  if (user.role === "operator") {
+    userAvatar.textContent = "🔧";
+    userInfo.className = "user-info operator";
+    
+    // Adicionar tooltip com certificação
+    const certification = user.certification || "Certificação não informada";
+    userInfo.title = `${user.name} (${roleText})\n${certification}`;
+  } else {
+    userAvatar.textContent = "🏢";
+    userInfo.className = "user-info client";
+    
+    // Adicionar tooltip com empresa
+    const company = user.company || "Empresa não informada";
+    userInfo.title = `${user.name} (${roleText})\n${company}`;
+  }
+}
+
+// Função para esconder informações do usuário
+function hideUserInfo() {
+  if (userInfo) {
+    userInfo.hidden = true;
+    // Limpar dados do card
+    if (userName) userName.textContent = "";
+    if (userRole) userRole.textContent = "";
+    if (userAvatar) userAvatar.textContent = "👤";
+    // Remover classes específicas do role
+    userInfo.className = "user-info";
+    // Limpar tooltip
+    userInfo.title = "";
+  }
 }

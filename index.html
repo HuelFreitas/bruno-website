@@ -16,6 +16,13 @@
         </div>
       </div>
       <nav class="topbar__actions" aria-label="Ações do sistema">
+        <div id="userInfo" class="user-info" hidden>
+          <div class="user-info__details">
+            <span class="user-info__name" id="userName"></span>
+            <span class="user-info__role" id="userRole"></span>
+          </div>
+          <div class="user-info__avatar" id="userAvatar">👤</div>
+        </div>
         <button id="themeToggle" class="ghost-button" type="button">Tema</button>
         <button id="logoutButton" class="ghost-button" type="button" hidden>Sair</button>
       </nav>
@@ -23,10 +30,14 @@
 
     <main id="app" class="app" tabindex="-1"></main>
 
+    <!-- Container de Notificações -->
+    <div id="notificationContainer" class="notification-container" aria-live="polite" aria-label="Notificações do sistema"></div>
+
     <footer class="footer">
       <p>&copy; <span id="year"></span> B&amp;B Educacão. Todos os direitos reservados.</p>
     </footer>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script type="module" src="./assets/app.js"></script>
   </body>
 </html>
