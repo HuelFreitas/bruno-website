@@ -425,6 +425,51 @@ textarea {
   font-weight: 600;
 }
 
+.availability-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.availability-slot {
+  background: rgba(37, 99, 235, 0.12);
+  border: 1px solid rgba(37, 99, 235, 0.25);
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.availability-slot span {
+  font-weight: 600;
+  color: var(--accent-strong);
+}
+
+.availability-slot small {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.help-text {
+  margin-top: 0.75rem;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.danger-button {
+  color: var(--danger);
+  border-color: rgba(185, 28, 28, 0.4);
+}
+
+.danger-button:hover,
+.danger-button:focus-visible {
+  background: rgba(185, 28, 28, 0.12);
+}
+
 .card__header {
   display: flex;
   flex-direction: column;

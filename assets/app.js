@@ -4,6 +4,13 @@ const THEME_KEY = "guardcan:theme";
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
+const companyAvailability = [
+  { value: "08:00", label: "08:00 - 10:00", description: "Inspeções matinais com dupla K9" },
+  { value: "10:00", label: "10:00 - 12:00", description: "Janela ideal para auditorias em docas" },
+  { value: "13:30", label: "13:30 - 15:30", description: "Equipe disponível após pausa operacional" },
+  { value: "16:00", label: "16:00 - 18:00", description: "Turno avançado para operações urgentes" },
+];
+
 function escapeHtml(value) {
   if (value === null || value === undefined) {
     return "";
@@ -43,7 +50,7 @@ const defaultState = {
       port: "Porto de Santos",
       vessel: "MSC Aurora",
       cargo: "Contêineres refrigerados",
-      scheduledFor: "2025-10-15",
+      scheduledFor: "2025-10-15T08:00:00",
       description:
         "Solicitação de inspeção preventiva com equipe K9 especializada em cargas sensíveis e perecíveis.",
       status: "in-progress",
@@ -87,7 +94,7 @@ const defaultState = {
       port: "Terminal de Aracruz",
       vessel: "Blue Atlantic",
       cargo: "Graneis sólidos",
-      scheduledFor: "2025-11-03",
+      scheduledFor: "2025-11-03T13:30:00",
       description:
         "Auditoria solicitada após alerta da Receita Federal para cargas de alto risco.",
       status: "pending",
@@ -322,6 +329,15 @@ function renderClientDashboard(user) {
           <input id="requestDate" name="scheduledFor" type="date" required />
         </div>
         <div>
+          <label for="requestTime">Horário disponível</label>
+          <select id="requestTime" name="scheduledTime" required>
+            <option value="">Selecione um horário</option>
+            ${companyAvailability
+              .map((slot) => `<option value="${escapeHtml(slot.value)}">${escapeHtml(slot.label)}</option>`)
+              .join("")}
+          </select>
+        </div>
+        <div>
           <label for="requestTags">Tags (separadas por vírgula)</label>
           <input id="requestTags" name="tags" placeholder="auditoria, alto risco" />
         </div>
@@ -333,6 +349,25 @@ function renderClientDashboard(user) {
           <button class="primary-button" type="submit">Enviar solicitação</button>
         </div>
       </form>
+    </section>
+
+    <section class="card" aria-labelledby="availability-heading">
+      <div class="card__header">
+        <h2 id="availability-heading">Horários disponíveis da equipe</h2>
+        <p>Escolha um dos turnos abaixo ao agendar uma nova inspeção.</p>
+      </div>
+      <ul class="availability-list">
+        ${companyAvailability
+          .map(
+            (slot) => `
+              <li class="availability-slot">
+                <span>${escapeHtml(slot.label)}</span>
+                <small>${escapeHtml(slot.description)}</small>
+              </li>
+            `
+          )
+          .join("")}
+      </ul>
     </section>
 
     <section class="card" aria-labelledby="requests-heading">
@@ -393,6 +428,9 @@ function handleCreateRequest(event, user) {
   event.preventDefault();
   const form = event.currentTarget;
   const data = new FormData(form);
+  const scheduledDate = typeof data.get("scheduledFor") === "string" ? data.get("scheduledFor") : "";
+  const scheduledTime = typeof data.get("scheduledTime") === "string" ? data.get("scheduledTime") : "";
+  const scheduledFor = combineDateTime(scheduledDate, scheduledTime);
   const request = {
     id: uid("req"),
     clientId: user.id,
@@ -401,7 +439,7 @@ function handleCreateRequest(event, user) {
     port: safeTrim(data.get("port")),
     vessel: safeTrim(data.get("vessel")),
     cargo: safeTrim(data.get("cargo")) || "Não informado",
-    scheduledFor: data.get("scheduledFor"),
+    scheduledFor,
     description: safeTrim(data.get("description")),
     status: "pending",
     tags: parseTags(data.get("tags")),
@@ -418,7 +456,15 @@ function handleCreateRequest(event, user) {
     report: null,
   };
 
-  if (!request.title || !request.port || !request.vessel || !request.description || !request.scheduledFor) {
+  if (
+    !request.title ||
+    !request.port ||
+    !request.vessel ||
+    !request.description ||
+    !scheduledDate ||
+    !scheduledTime ||
+    !request.scheduledFor
+  ) {
     announce("Preencha todos os campos obrigatórios da solicitação.");
     return;
   }
@@ -456,17 +502,25 @@ function showRequestModal(request, viewer) {
   const safePort = escapeHtml(request.port);
   const safeVessel = escapeHtml(request.vessel);
   const safeDescription = escapeHtml(request.description);
+  const safeCargo = escapeHtml(request.cargo || "Não informado");
   const safeClientName = escapeHtml(client.name);
   const safeOperatorName = assignedOperator
     ? escapeHtml(assignedOperator.name)
     : "";
+  const safeSchedule = escapeHtml(formatDate(request.scheduledFor));
+  const tagListMarkup =
+    request.tags?.length
+      ? request.tags
+          .map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`)
+          .join("")
+      : "";
 
   dialog.innerHTML = `
     <div class="modal__header">
       <div>
         <p class="badge">${safeRequestIdBadge}</p>
-        <h3>${safeTitle}</h3>
-        <p>${safePort} • ${safeVessel}</p>
+        <h3 data-field="title">${safeTitle}</h3>
+        <p data-field="header-summary">${safePort} • ${safeVessel}</p>
       </div>
       <div>
         ${buildStatusChip(request.status)}
@@ -475,11 +529,14 @@ function showRequestModal(request, viewer) {
     <div class="modal__body">
       <section aria-label="Detalhes da operação">
         <h4>Detalhes gerais</h4>
-        <p><strong>Cliente:</strong> ${safeClientName}</p>
-        ${assignedOperator ? `<p><strong>Operador:</strong> ${safeOperatorName}</p>` : ""}
-        <p><strong>Data prevista:</strong> ${formatDate(request.scheduledFor)}</p>
-        <p><strong>Descrição:</strong> ${safeDescription}</p>
-        ${request.tags?.length ? `<div class="tag-list">${request.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}</div>` : ""}
+        <p><strong>Cliente:</strong> <span data-field="client-name">${safeClientName}</span></p>
+        <p><strong>Operador:</strong> <span data-field="operator-name">${safeOperatorName || "A definir"}</span></p>
+        <p><strong>Data e horário:</strong> <span data-field="schedule">${safeSchedule}</span></p>
+        <p><strong>Porto / Terminal:</strong> <span data-field="port">${safePort}</span></p>
+        <p><strong>Embarcação:</strong> <span data-field="vessel">${safeVessel}</span></p>
+        <p><strong>Tipo de carga:</strong> <span data-field="cargo">${safeCargo}</span></p>
+        <p><strong>Descrição:</strong> <span data-field="description">${safeDescription}</span></p>
+        <div class="tag-list" data-field="tags" ${tagListMarkup ? "" : "hidden"}>${tagListMarkup}</div>
       </section>
       <section aria-label="Linha do tempo" class="timeline-section">
         <h4>Histórico</h4>
@@ -524,6 +581,7 @@ function showRequestModal(request, viewer) {
     dialog
       .querySelector("#clientNoteForm")
       ?.addEventListener("submit", (event) => handleClientNote(event, request, viewer, dialog));
+    setupClientManagement(dialog, request, viewer);
   }
 
   dialog.querySelector("[data-export]")?.addEventListener("click", () => exportReport(request));
@@ -593,6 +651,16 @@ function operatorActions(request, viewer) {
 }
 
 function clientActions(request, viewer) {
+  const dateValue = escapeHtml(getDateInputValue(request.scheduledFor));
+  const timeValue = escapeHtml(getTimeInputValue(request.scheduledFor));
+  const safeTitle = escapeHtml(request.title);
+  const safePort = escapeHtml(request.port);
+  const safeVessel = escapeHtml(request.vessel);
+  const cargoValue = request.cargo && request.cargo !== "Não informado" ? request.cargo : "";
+  const safeCargo = escapeHtml(cargoValue);
+  const safeTags = escapeHtml((request.tags || []).join(", "));
+  const safeDescription = escapeHtml(request.description);
+
   return `
     <section aria-label="Observações do cliente" class="card" style="box-shadow:none; border:1px solid var(--border);">
       <h4>Complementar informações</h4>
@@ -601,6 +669,59 @@ function clientActions(request, viewer) {
         <textarea id="clientNote" name="note" placeholder="Informe restrições, mudanças de agenda ou liberações."></textarea>
         <button class="secondary-button" type="submit">Enviar mensagem</button>
       </form>
+    </section>
+    <section aria-label="Gerenciar solicitação" class="card" style="box-shadow:none; border:1px solid var(--border);">
+      <h4>Gerenciar solicitação</h4>
+      <p>Atualize detalhes importantes ou cancele a inspeção quando necessário.</p>
+      <button class="secondary-button" type="button" data-toggle-edit>Editar solicitação</button>
+      <form id="editRequestForm" class="grid-two" data-edit-form hidden>
+        <div>
+          <label for="editTitle">Título</label>
+          <input id="editTitle" name="title" required value="${safeTitle}" />
+        </div>
+        <div>
+          <label for="editPort">Porto / Terminal</label>
+          <input id="editPort" name="port" required value="${safePort}" />
+        </div>
+        <div>
+          <label for="editVessel">Embarcação</label>
+          <input id="editVessel" name="vessel" required value="${safeVessel}" />
+        </div>
+        <div>
+          <label for="editCargo">Tipo de carga</label>
+          <input id="editCargo" name="cargo" value="${safeCargo}" />
+        </div>
+        <div>
+          <label for="editDate">Data prevista</label>
+          <input id="editDate" name="scheduledFor" type="date" required value="${dateValue}" />
+        </div>
+        <div>
+          <label for="editTime">Horário disponível</label>
+          <select id="editTime" name="scheduledTime" required>
+            <option value="">Selecione um horário</option>
+            ${companyAvailability
+              .map((slot) => {
+                const optionValue = escapeHtml(slot.value);
+                const isSelected = timeValue === optionValue ? "selected" : "";
+                return `<option value="${optionValue}" ${isSelected}>${escapeHtml(slot.label)}</option>`;
+              })
+              .join("")}
+          </select>
+        </div>
+        <div>
+          <label for="editTags">Tags</label>
+          <input id="editTags" name="tags" value="${safeTags}" />
+        </div>
+        <div class="full-row">
+          <label for="editDescription">Descrição</label>
+          <textarea id="editDescription" name="description" required>${safeDescription}</textarea>
+        </div>
+        <div class="full-row">
+          <button class="primary-button" type="submit">Salvar alterações</button>
+        </div>
+      </form>
+      <button class="ghost-button danger-button" type="button" data-delete-request>Excluir solicitação</button>
+      <p class="help-text">Ao excluir, toda a linha do tempo será removida e a equipe B&amp;B será notificada.</p>
     </section>
   `;
 }
@@ -725,6 +846,120 @@ function handleClientNote(event, request, client, dialog) {
   if (timeline) timeline.insertAdjacentHTML("afterbegin", timelineItem(entry));
   announce("Mensagem adicionada ao histórico.");
   renderApp();
+}
+
+function setupClientManagement(dialog, request, client) {
+  const editToggle = dialog.querySelector("[data-toggle-edit]");
+  const editFormContainer = dialog.querySelector("[data-edit-form]");
+  const editForm = dialog.querySelector("#editRequestForm");
+
+  if (editToggle && editFormContainer) {
+    editToggle.addEventListener("click", () => {
+      const isHidden = editFormContainer.hasAttribute("hidden");
+      if (isHidden) {
+        editFormContainer.removeAttribute("hidden");
+        editToggle.textContent = "Fechar edição";
+      } else {
+        editFormContainer.setAttribute("hidden", "");
+        editToggle.textContent = "Editar solicitação";
+      }
+    });
+  }
+
+  editForm?.addEventListener("submit", (event) =>
+    handleRequestEdit(event, request, client, dialog, editToggle, editFormContainer)
+  );
+
+  dialog
+    .querySelector("[data-delete-request]")
+    ?.addEventListener("click", () => handleRequestDelete(request, dialog));
+}
+
+function handleRequestEdit(event, request, client, dialog, toggleButton, formContainer) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = new FormData(form);
+
+  const title = safeTrim(data.get("title"));
+  const port = safeTrim(data.get("port"));
+  const vessel = safeTrim(data.get("vessel"));
+  const cargo = safeTrim(data.get("cargo")) || "Não informado";
+  const description = safeTrim(data.get("description"));
+  const scheduledDateValue = typeof data.get("scheduledFor") === "string" ? data.get("scheduledFor") : "";
+  const scheduledTimeValue = typeof data.get("scheduledTime") === "string" ? data.get("scheduledTime") : "";
+  const scheduledFor = combineDateTime(scheduledDateValue, scheduledTimeValue);
+  const tags = parseTags(data.get("tags"));
+
+  if (!title || !port || !vessel || !description || !scheduledFor) {
+    announce("Preencha todos os campos obrigatórios antes de salvar.");
+    return;
+  }
+
+  request.title = title;
+  request.port = port;
+  request.vessel = vessel;
+  request.cargo = cargo;
+  request.description = description;
+  request.scheduledFor = scheduledFor;
+  request.tags = tags;
+  request.updatedAt = new Date().toISOString();
+
+  const entry = createTimelineEntry({
+    actor: client,
+    title: "Cliente atualizou a solicitação",
+    description: "Detalhes do serviço revisados pelo solicitante.",
+    category: "client",
+  });
+  request.timeline.push(entry);
+
+  saveState();
+  updateRequestDetailsInModal(dialog, request);
+
+  const timeline = dialog.querySelector(".timeline");
+  if (timeline) timeline.insertAdjacentHTML("afterbegin", timelineItem(entry));
+
+  if (toggleButton && formContainer) {
+    formContainer.setAttribute("hidden", "");
+    toggleButton.textContent = "Editar solicitação";
+  }
+
+  form.querySelector("textarea")?.blur();
+  announce("Solicitação atualizada com sucesso.");
+  renderApp();
+
+  const descriptionField = form.querySelector("#editDescription");
+  if (descriptionField) descriptionField.value = description;
+  const titleField = form.querySelector("#editTitle");
+  if (titleField) titleField.value = title;
+  const portField = form.querySelector("#editPort");
+  if (portField) portField.value = port;
+  const vesselField = form.querySelector("#editVessel");
+  if (vesselField) vesselField.value = vessel;
+  const cargoField = form.querySelector("#editCargo");
+  if (cargoField) cargoField.value = cargo === "Não informado" ? "" : cargo;
+  const dateField = form.querySelector("#editDate");
+  if (dateField) dateField.value = scheduledDateValue;
+  const timeField = form.querySelector("#editTime");
+  if (timeField) timeField.value = scheduledTimeValue;
+  const tagsField = form.querySelector("#editTags");
+  if (tagsField) tagsField.value = tags.join(", ");
+}
+
+function handleRequestDelete(request, dialog) {
+  const confirmed = window.confirm(
+    "Tem certeza que deseja excluir esta solicitação? Esta ação não pode ser desfeita."
+  );
+  if (!confirmed) return;
+
+  const index = state.requests.findIndex((item) => item.id === request.id);
+  if (index >= 0) {
+    state.requests.splice(index, 1);
+    saveState();
+  }
+
+  dialog.close();
+  renderApp();
+  announce("Solicitação removida. A equipe será notificada.");
 }
 
 function buildMetrics(requests) {
@@ -921,6 +1156,73 @@ function formatDate(value) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
+}
+
+function combineDateTime(dateValue, timeValue) {
+  if (!dateValue || !timeValue) return "";
+  const [hours, minutes] = String(timeValue).split(":");
+  if (!hours || !minutes) return "";
+  const normalizedHours = hours.padStart(2, "0");
+  const normalizedMinutes = minutes.padStart(2, "0");
+  const isoLike = `${dateValue}T${normalizedHours}:${normalizedMinutes}:00`;
+  const parsed = new Date(isoLike);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return isoLike;
+}
+
+function getDateInputValue(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getTimeInputValue(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
+}
+
+function updateRequestDetailsInModal(dialog, request) {
+  const titleField = dialog.querySelector('[data-field="title"]');
+  if (titleField) titleField.textContent = request.title;
+
+  const summaryField = dialog.querySelector('[data-field="header-summary"]');
+  if (summaryField) summaryField.textContent = `${request.port} • ${request.vessel}`;
+
+  const portField = dialog.querySelector('[data-field="port"]');
+  if (portField) portField.textContent = request.port;
+
+  const vesselField = dialog.querySelector('[data-field="vessel"]');
+  if (vesselField) vesselField.textContent = request.vessel;
+
+  const cargoField = dialog.querySelector('[data-field="cargo"]');
+  if (cargoField) cargoField.textContent = request.cargo || "Não informado";
+
+  const descriptionField = dialog.querySelector('[data-field="description"]');
+  if (descriptionField) descriptionField.textContent = request.description;
+
+  const scheduleField = dialog.querySelector('[data-field="schedule"]');
+  if (scheduleField) scheduleField.textContent = formatDate(request.scheduledFor);
+
+  const tagsContainer = dialog.querySelector('[data-field="tags"]');
+  if (tagsContainer) {
+    if (request.tags?.length) {
+      tagsContainer.innerHTML = request.tags
+        .map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`)
+        .join("");
+      tagsContainer.removeAttribute("hidden");
+    } else {
+      tagsContainer.innerHTML = "";
+      tagsContainer.setAttribute("hidden", "");
+    }
+  }
 }
 
 function parseTags(raw) {
