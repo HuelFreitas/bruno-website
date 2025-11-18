@@ -4,6 +4,7 @@ import { formatDate, uid, combineDateTime, getDateInputValue, formatFileSize } f
 import { clone, announce } from '../src/utils/dom.js';
 import { buildRequestTable } from '../src/components/requests.js';
 import { timelineItem } from '../src/components/timeline.js';
+import { createCalendar, initializeCalendar as initCalendar } from '../src/components/calendar.js';
 import { attachRequestModalHandlers as attachModalHandlers, showRequestModal as showModal } from '../src/components/modal.js';
 import { metricCard, buildStatusFilterTab, createSearchInterface } from '../src/components/ui.js';
 import { handleStatusUpdate } from '../src/handlers/status.js';
@@ -420,6 +421,41 @@ function renderClientDashboard(user) {
     });
   });
 
+  const sharedShowModal = (request, user) => showModal(request, user, {
+    resolveUser,
+    escapeHtml,
+    formatDate,
+    timelineItem,
+    operatorActions,
+    clientActions,
+    createUploadArea,
+    initializeUploadArea,
+    handleStatusUpdate,
+    handleProgressUpdate,
+    handleReportSubmission,
+    handleClientNote,
+    setupClientManagement,
+    exportReport,
+    renderApp,
+    announce,
+    buildStatusChip,
+    safeTrim,
+    createTimelineEntry,
+    saveState,
+    showSuccessNotification,
+    showInfoNotification,
+    showErrorNotification,
+    showWarningNotification,
+    combineDateTime,
+    parseTags,
+    updateRequestDetailsInModal,
+    confirm: (msg) => confirm(msg),
+    state,
+    uid,
+    findRequestById: (id) => state.requests.find((r) => r.id === id),
+    findUserById: (id) => state.users.find((u) => u.id === id),
+  });
+
   attachModalHandlers(document, user, {
     findRequestById: (id) => state.requests.find((r) => r.id === id),
     findUserById: (id) => state.users.find((u) => u.id === id),
@@ -440,44 +476,11 @@ function renderClientDashboard(user) {
     renderApp,
     announce,
     buildStatusChip,
-    showRequestModal: (request, user) => showModal(request, user, {
-      resolveUser,
-      escapeHtml,
-      formatDate,
-      timelineItem,
-      operatorActions,
-      clientActions,
-      createUploadArea,
-      initializeUploadArea,
-      handleStatusUpdate,
-      handleProgressUpdate,
-      handleReportSubmission,
-      handleClientNote,
-      setupClientManagement,
-      exportReport,
-      renderApp,
-      announce,
-      buildStatusChip,
-      safeTrim,
-      createTimelineEntry,
-      saveState,
-      showSuccessNotification,
-      showInfoNotification,
-      showErrorNotification,
-      showWarningNotification,
-      combineDateTime,
-      parseTags,
-      updateRequestDetailsInModal,
-      confirm: (msg) => confirm(msg),
-      state,
-      uid,
-      findRequestById: (id) => state.requests.find((r) => r.id === id),
-      findUserById: (id) => state.users.find((u) => u.id === id),
-    })
+    showRequestModal: sharedShowModal,
   });
   
-  // Inicializar calendário
-  initializeCalendar(requests, user);
+  // Inicializar calendário (injeção de dependências para melhor testabilidade)
+  initCalendar(requests, user, { showRequestModal: sharedShowModal, requestsSource: state.requests });
   
   // Inicializar busca avançada (com delay para garantir que o DOM esteja pronto)
   setTimeout(() => {
@@ -1317,120 +1320,7 @@ function showInfoNotification(title, message, duration = 4000) {
 
 
 // Sistema de Calendário Visual
-let currentCalendarDate = new Date();
-
-function createCalendar(requests, user) {
-  const today = new Date();
-  const year = currentCalendarDate.getFullYear();
-  const month = currentCalendarDate.getMonth();
-  
-  const firstDay = new Date(year, month, 1);
-  const lastDay = new Date(year, month + 1, 0);
-  const startDate = new Date(firstDay);
-  startDate.setDate(startDate.getDate() - firstDay.getDay());
-  
-  const endDate = new Date(lastDay);
-  endDate.setDate(endDate.getDate() + (6 - lastDay.getDay()));
-  
-  const days = [];
-  const currentDate = new Date(startDate);
-  
-  while (currentDate <= endDate) {
-    const dayRequests = requests.filter(request => {
-      const requestDate = new Date(request.scheduledFor);
-      return requestDate.toDateString() === currentDate.toDateString();
-    });
-    
-    days.push({
-      date: new Date(currentDate),
-      requests: dayRequests,
-      isCurrentMonth: currentDate.getMonth() === month,
-      isToday: currentDate.toDateString() === today.toDateString()
-    });
-    
-    currentDate.setDate(currentDate.getDate() + 1);
-  }
-  
-  const monthNames = [
-    'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-    'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
-  ];
-  
-  const dayNames = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
-  
-  return `
-    <div class="calendar-container">
-      <div class="calendar-header">
-        <h3 class="calendar-title">${monthNames[month]} ${year}</h3>
-        <div class="calendar-nav">
-          <button class="calendar-nav-button" id="prevMonth" type="button" aria-label="Mês anterior">‹</button>
-          <button class="calendar-nav-button" id="nextMonth" type="button" aria-label="Próximo mês">›</button>
-        </div>
-      </div>
-      
-      <div class="calendar-grid">
-        ${dayNames.map(day => `<div class="calendar-day-header">${day}</div>`).join('')}
-        
-        ${days.map(day => {
-          const dayNumber = day.date.getDate();
-          const isOtherMonth = !day.isCurrentMonth;
-          const isToday = day.isToday;
-          const events = day.requests.slice(0, 2);
-          const hasMore = day.requests.length > 2;
-          const moreCount = day.requests.length - 2;
-          
-          return `
-            <div class="calendar-day ${isOtherMonth ? 'other-month' : ''} ${isToday ? 'today' : ''}" 
-                 data-date="${day.date.toISOString().split('T')[0]}">
-              <div class="calendar-day-number">${dayNumber}</div>
-              <div class="calendar-events">
-                ${events.map(request => `
-                  <div class="calendar-event ${request.status}" 
-                       data-request="${request.id}" 
-                       title="${escapeHtml(request.title)}">
-                    ${escapeHtml(request.title.length > 15 ? request.title.substring(0, 15) + '...' : request.title)}
-                  </div>
-                `).join('')}
-                ${hasMore ? `<div class="calendar-event-more">+${moreCount} mais</div>` : ''}
-              </div>
-            </div>
-          `;
-        }).join('')}
-      </div>
-    </div>
-  `;
-}
-
-function initializeCalendar(requests, user) {
-  const calendarContainer = document.getElementById('calendarContainer');
-  if (!calendarContainer) return;
-  
-  calendarContainer.innerHTML = createCalendar(requests, user);
-  
-  // Event listeners para navegação
-  document.getElementById('prevMonth')?.addEventListener('click', () => {
-    currentCalendarDate.setMonth(currentCalendarDate.getMonth() - 1);
-    calendarContainer.innerHTML = createCalendar(requests, user);
-    initializeCalendar(requests, user);
-  });
-  
-  document.getElementById('nextMonth')?.addEventListener('click', () => {
-    currentCalendarDate.setMonth(currentCalendarDate.getMonth() + 1);
-    calendarContainer.innerHTML = createCalendar(requests, user);
-    initializeCalendar(requests, user);
-  });
-  
-  // Event listeners para eventos do calendário
-  calendarContainer.querySelectorAll('.calendar-event').forEach(eventElement => {
-    eventElement.addEventListener('click', () => {
-      const requestId = eventElement.dataset.request;
-      const request = state.requests.find(r => r.id === requestId);
-      if (request) {
-        showRequestModal(request, user);
-      }
-    });
-  });
-}
+// calendar functions moved to `src/components/calendar.js` (imported above as createCalendar/initCalendar)
 
 // createSearchInterface moved to `src/components/ui.js`
 
