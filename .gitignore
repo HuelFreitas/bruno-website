@@ -1,3 +1,14 @@
+ .DS_Store
+ /node_modules/
+ /dist/
+ /dist-*
+ .vscode/
+ .env
+ .idea/
+ coverage/
+ npm-debug.log*
+ .yarn-integrity
+ **/node_modules/
 # Angular specific
 /dist/
 /out-tsc/

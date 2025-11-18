@@ -1,3 +1,8 @@
+import { jsPDF } from 'jspdf';
+import { escapeHtml, safeTrim } from '../src/utils/string.js';
+import { formatDate, uid, combineDateTime, getDateInputValue } from '../src/utils/misc.js';
+import { metricCard, buildStatusFilterTab, createSearchInterface } from '../src/components/ui.js';
+
 const STORAGE_KEY = "guardcan:data:v1";
 const SESSION_KEY = "guardcan:session";
 const THEME_KEY = "guardcan:theme";
@@ -11,18 +16,7 @@ const companyAvailability = [
   { value: "16:00", label: "16:00 - 18:00", description: "Turno avançado para operações urgentes" },
 ];
 
-function escapeHtml(value) {
-  if (value === null || value === undefined) {
-    return "";
-  }
 
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
 
 const defaultState = {
   users: [
@@ -1189,18 +1183,6 @@ function buildOperatorBoard(requests, viewer) {
   `;
 }
 
-function metricCard(label, value, tone = "primary") {
-  const toneClass =
-    tone === "success" ? "status--completed" : tone === "warning" ? "status--pending" : tone === "info" ? "status--in-progress" : "";
-  return `
-    <article class="card" aria-label="${label}">
-      <h2>${value}</h2>
-      <p>${label}</p>
-      ${toneClass ? `<span class="status-chip ${toneClass}">${label}</span>` : ""}
-    </article>
-  `;
-}
-
 function emptyState(title, subtitle) {
   return `
     <div class="empty-state">
@@ -1220,9 +1202,7 @@ function buildStatusChip(status) {
   return `<span class="status-chip ${entry.className}">${entry.label}</span>`;
 }
 
-function buildStatusFilterTab(value, label, current) {
-  return `<button class="tab" type="button" role="tab" data-active="${current === value}" data-filter="${value}">${label}</button>`;
-}
+// `buildStatusFilterTab` moved to `src/components/ui.js`
 
 function timelineItem(event) {
   return `
@@ -1253,40 +1233,7 @@ function createTimelineEntry({ actor, title, description, category }) {
   };
 }
 
-function formatDate(value) {
-  if (!value) return "Não informado";
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return "Não informado";
-  return new Intl.DateTimeFormat("pt-BR", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
 
-function combineDateTime(dateValue, timeValue) {
-  if (!dateValue || !timeValue) return "";
-  const [hours, minutes] = String(timeValue).split(":");
-  if (!hours || !minutes) return "";
-  const normalizedHours = hours.padStart(2, "0");
-  const normalizedMinutes = minutes.padStart(2, "0");
-  const isoLike = `${dateValue}T${normalizedHours}:${normalizedMinutes}:00`;
-  const parsed = new Date(isoLike);
-  if (Number.isNaN(parsed.getTime())) return "";
-  return isoLike;
-}
-
-function getDateInputValue(value) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
 
 function getTimeInputValue(value) {
   if (!value) return "";
@@ -1341,9 +1288,7 @@ function parseTags(raw) {
     .filter(Boolean);
 }
 
-function safeTrim(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
+
 
 function translateStatus(status) {
   return {
@@ -1359,22 +1304,20 @@ function resolveUser(id) {
 
 function exportReport(request) {
   if (!request.report) return;
-  
-  // Verificar se jsPDF está disponível
-  if (typeof window.jsPDF === 'undefined') {
+  const client = resolveUser(request.clientId);
+  const operator = resolveUser(request.report.operatorId || request.assignedOperatorId);
+
+  // Usar exclusivamente o import ESM `jsPDF` (dependência explícita em package.json)
+  if (typeof jsPDF === 'undefined') {
     showErrorNotification(
-      "Biblioteca não carregada",
-      "A biblioteca PDF não foi carregada. Tente novamente em alguns segundos.",
+      'Biblioteca não carregada',
+      'A biblioteca PDF não está disponível. Execute `npm install` para instalar dependências.',
       5000
     );
     return;
   }
 
-  const client = resolveUser(request.clientId);
-  const operator = resolveUser(request.report.operatorId || request.assignedOperatorId);
-
   try {
-    const { jsPDF } = window.jsPDF;
     const doc = new jsPDF();
     
     // Configurações do documento
@@ -1553,9 +1496,7 @@ function saveSession() {
   }
 }
 
-function uid(prefix = "id") {
-  return `${prefix}-${Math.random().toString(36).slice(2, 8)}-${Date.now().toString(36)}`;
-}
+// `uid` implementation moved to `src/utils/misc.js`
 
 function announce(message) {
   const regionId = "guardcan-live";
