@@ -1,13 +1,17 @@
 import { jsPDF } from 'jspdf';
 import { escapeHtml, safeTrim } from '../src/utils/string.js';
 import { formatDate, uid, combineDateTime, getDateInputValue } from '../src/utils/misc.js';
+import { clone, announce } from '../src/utils/dom.js';
+import { buildRequestTable } from '../src/components/requests.js';
+import { timelineItem } from '../src/components/timeline.js';
+import { attachRequestModalHandlers as attachModalHandlers, showRequestModal as showModal } from '../src/components/modal.js';
 import { metricCard, buildStatusFilterTab, createSearchInterface } from '../src/components/ui.js';
 
 const STORAGE_KEY = "guardcan:data:v1";
 const SESSION_KEY = "guardcan:session";
 const THEME_KEY = "guardcan:theme";
 
-const clone = (value) => JSON.parse(JSON.stringify(value));
+// `clone` moved to `src/utils/dom.js`
 
 const companyAvailability = [
   { value: "08:00", label: "08:00 - 10:00", description: "Inspeções matinais com dupla K9" },
@@ -390,13 +394,13 @@ function renderClientDashboard(user) {
           <p>Gerencie inspeções, acompanhe o progresso em tempo real e baixe relatórios.</p>
         </div>
         <div class="tab-group" role="tablist">
-          ${buildStatusFilterTab("all", "Todas", uiState.filterStatus)}
-          ${buildStatusFilterTab("pending", "Pendentes", uiState.filterStatus)}
-          ${buildStatusFilterTab("in-progress", "Em andamento", uiState.filterStatus)}
-          ${buildStatusFilterTab("completed", "Concluídas", uiState.filterStatus)}
+                  ${buildStatusFilterTab("all", "Todas", uiState.filterStatus)}
+                  ${buildStatusFilterTab("pending", "Pendentes", uiState.filterStatus)}
+                  ${buildStatusFilterTab("in-progress", "Em andamento", uiState.filterStatus)}
+                  ${buildStatusFilterTab("completed", "Concluídas", uiState.filterStatus)}
         </div>
       </div>
-      ${requests.length ? buildRequestTable(requests, uiState.filterStatus, user) : emptyState("Nenhuma solicitação cadastrada", "Crie sua primeira inspeção para acompanhar aqui.")}
+              ${requests.length ? buildRequestTable(requests, uiState.filterStatus, user, { resolveUser, escapeHtml, formatDate, buildStatusChip, emptyState }) : emptyState("Nenhuma solicitação cadastrada", "Crie sua primeira inspeção para acompanhar aqui.")}
     </section>
   `;
 
@@ -411,7 +415,48 @@ function renderClientDashboard(user) {
     });
   });
 
-  attachRequestModalHandlers(user);
+  attachModalHandlers(document, user, {
+    findRequestById: (id) => state.requests.find((r) => r.id === id),
+    findUserById: (id) => state.users.find((u) => u.id === id),
+    resolveUser,
+    escapeHtml,
+    formatDate,
+    timelineItem,
+    operatorActions,
+    clientActions,
+    createUploadArea,
+    initializeUploadArea,
+    handleStatusUpdate,
+    handleProgressUpdate,
+    handleReportSubmission,
+    handleClientNote,
+    setupClientManagement,
+    exportReport,
+    renderApp,
+    announce,
+    buildStatusChip,
+    showRequestModal: (request, user) => showModal(request, user, {
+      resolveUser,
+      escapeHtml,
+      formatDate,
+      timelineItem,
+      operatorActions,
+      clientActions,
+      createUploadArea,
+      initializeUploadArea,
+      handleStatusUpdate,
+      handleProgressUpdate,
+      handleReportSubmission,
+      handleClientNote,
+      setupClientManagement,
+      exportReport,
+      renderApp,
+      announce,
+      buildStatusChip,
+      findRequestById: (id) => state.requests.find((r) => r.id === id),
+      findUserById: (id) => state.users.find((u) => u.id === id),
+    })
+  });
   
   // Inicializar calendário
   initializeCalendar(requests, user);
@@ -1102,54 +1147,7 @@ function buildOperatorMetrics(requests, operatorId) {
   };
 }
 
-function buildRequestTable(requests, filter, viewer) {
-  const filtered = filter === "all" ? requests : requests.filter((request) => request.status === filter);
-  if (!filtered.length) {
-    return emptyState("Nenhuma solicitação com este filtro", "Selecione outro status para visualizar.");
-  }
-
-  return `
-    <div class="table-wrapper">
-      <table class="table">
-        <thead>
-          <tr>
-            <th scope="col">Título</th>
-            <th scope="col">Data prevista</th>
-            <th scope="col">Status</th>
-            <th scope="col">Operador</th>
-            <th scope="col"><span class="sr-only">Ações</span></th>
-          </tr>
-        </thead>
-        <tbody>
-          ${filtered
-            .map((request) => {
-              const operatorName = request.assignedOperatorId ? resolveUser(request.assignedOperatorId)?.name : "-";
-              const safeTitle = escapeHtml(request.title);
-              const safePort = escapeHtml(request.port);
-              const safeOperator = escapeHtml(operatorName || "-");
-              const safeRequestId = escapeHtml(request.id);
-
-              return `
-                <tr>
-                  <td>
-                    <strong>${safeTitle}</strong>
-                    <p>${safePort}</p>
-                  </td>
-                  <td>${formatDate(request.scheduledFor)}</td>
-                  <td>${buildStatusChip(request.status)}</td>
-                  <td>${safeOperator}</td>
-                  <td>
-                    <button class="secondary-button" type="button" data-request="${safeRequestId}">Detalhes</button>
-                  </td>
-                </tr>
-              `;
-            })
-            .join("")}
-        </tbody>
-      </table>
-    </div>
-  `;
-}
+// `buildRequestTable` moved to `src/components/requests.js` (imported above)
 
 function buildOperatorBoard(requests, viewer) {
   return `

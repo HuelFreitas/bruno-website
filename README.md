@@ -9,10 +9,40 @@ Protótipo responsivo para gestão de operações de fiscalização marítima co
 
 ## Pré-requisitos
 
-- Navegador moderno (Chrome, Edge, Firefox ou Safari) com suporte a `localStorage` e `dialog`.
-- Não é necessário instalar dependências ou executar build.
 
-## Como executar
+Bruno's personal website prototype.
+
+## Desenvolvimento (local)
+
+Passos rápidos para desenvolver localmente:
+
+1. Instale dependências:
+
+```bash
+npm install
+```
+
+2. Rode o servidor de desenvolvimento (Vite):
+
+```bash
+npm run dev
+```
+
+3. Rode os testes:
+
+```bash
+npm test
+```
+
+4. Gerar build de produção:
+
+```bash
+npm run build
+```
+
+Observações:
+- Execute `npm install` antes de `npm run dev` para garantir que `jspdf` e outras dependências estejam instaladas.
+- Pull requests devem rodar CI (lint + tests) automaticamente.
 
 1. Faça o download/clonagem do repositório.
    ```bash
