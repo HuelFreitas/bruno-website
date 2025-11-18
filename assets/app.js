@@ -12,6 +12,8 @@ import { handleProgressUpdate } from '../src/handlers/progress.js';
 import { handleReportSubmission } from '../src/handlers/report.js';
 import { handleClientNote, setupClientManagement, handleRequestEdit, handleRequestDelete } from '../src/handlers/client.js';
 import { createUploadArea, initializeUploadArea, handleFileUpload, renderEvidenceGallery, removeEvidence, viewEvidence } from '../src/components/upload.js';
+import { showNotification, hideNotification, showSuccessNotification, showErrorNotification, showWarningNotification, showInfoNotification } from '../src/ui/notifications.js';
+import { loadTheme as loadThemeFromStorage, applyTheme as applyThemeToDOM, toggleTheme as toggleThemeInDOM } from '../src/ui/theme.js';
 
 const STORAGE_KEY = "guardcan:data:v1";
 const SESSION_KEY = "guardcan:session";
@@ -1236,91 +1238,8 @@ function saveSession() {
   }
 }
 
-// `uid` implementation moved to `src/utils/misc.js`
-
-// announce moved to `src/utils/dom.js`
-
 // Sistema de Notificações Visuais
-function showNotification(title, message, type = "info", duration = 5000) {
-  const container = document.getElementById("notificationContainer");
-  if (!container) return;
-
-  const notification = document.createElement("div");
-  notification.className = `notification ${type}`;
-  
-  const icons = {
-    success: "✅",
-    error: "❌", 
-    warning: "⚠️",
-    info: "ℹ️"
-  };
-
-  notification.innerHTML = `
-    <div class="notification__header">
-      <div style="display: flex; align-items: center;">
-        <span class="notification__icon">${icons[type] || icons.info}</span>
-        <h4 class="notification__title">${escapeHtml(title)}</h4>
-      </div>
-      <button class="notification__close" type="button" aria-label="Fechar notificação">×</button>
-    </div>
-    <p class="notification__message">${escapeHtml(message)}</p>
-    <div class="notification__progress"></div>
-  `;
-
-  // Adicionar evento de fechamento
-  const closeButton = notification.querySelector(".notification__close");
-  closeButton.addEventListener("click", () => {
-    hideNotification(notification);
-  });
-
-  container.appendChild(notification);
-
-  // Animar entrada
-  requestAnimationFrame(() => {
-    notification.classList.add("show");
-  });
-
-  // Auto-remover após duração
-  if (duration > 0) {
-    setTimeout(() => {
-      hideNotification(notification);
-    }, duration);
-  }
-
-  return notification;
-}
-
-function hideNotification(notification) {
-  if (!notification || !notification.parentNode) return;
-  
-  notification.classList.remove("show");
-  setTimeout(() => {
-    if (notification.parentNode) {
-      notification.parentNode.removeChild(notification);
-    }
-  }, 300);
-}
-
-// Funções de conveniência para diferentes tipos de notificação
-function showSuccessNotification(title, message, duration = 4000) {
-  return showNotification(title, message, "success", duration);
-}
-
-function showErrorNotification(title, message, duration = 6000) {
-  return showNotification(title, message, "error", duration);
-}
-
-function showWarningNotification(title, message, duration = 5000) {
-  return showNotification(title, message, "warning", duration);
-}
-
-function showInfoNotification(title, message, duration = 4000) {
-  return showNotification(title, message, "info", duration);
-}
-
-
-// Sistema de Calendário Visual
-// calendar functions moved to `src/components/calendar.js` (imported above as createCalendar/initCalendar)
+// (moved to `src/ui/notifications.js`)
 
 // createSearchInterface moved to `src/components/ui.js`
 
@@ -1542,28 +1461,19 @@ function focusMain() {
 }
 
 function loadTheme() {
-  if (typeof localStorage === "undefined") {
-    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-  }
-  return localStorage.getItem(THEME_KEY) || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  return loadThemeFromStorage(THEME_KEY);
 }
 
 function applyTheme(theme) {
-  document.documentElement.setAttribute("data-theme", theme);
-  if (typeof localStorage !== "undefined") {
-    localStorage.setItem(THEME_KEY, theme);
-  }
-  updateThemeToggleLabel(theme);
+  return applyThemeToDOM(theme, THEME_KEY, themeToggle);
 }
 
 function toggleTheme() {
-  const current = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
-  applyTheme(current === "dark" ? "light" : "dark");
+  toggleThemeInDOM(THEME_KEY, themeToggle);
 }
 
 function updateThemeToggleLabel(theme) {
-  if (!themeToggle) return;
-  themeToggle.textContent = theme === "dark" ? "Modo claro" : "Modo escuro";
+  // Now handled by applyTheme import
 }
 
 // Função para atualizar informações do usuário no header

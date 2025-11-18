@@ -92,21 +92,22 @@ function initializeCalendar(requests = [], user = {}, { document = window.docume
   const calendarContainer = document.getElementById ? document.getElementById('calendarContainer') : null;
   if (!calendarContainer) return;
 
-  calendarContainer.innerHTML = createCalendar(requests, user, { escapeHtml: defaultEscape });
+  const renderRequests = requestsSource || requests;
+  calendarContainer.innerHTML = createCalendar(renderRequests, user, { escapeHtml: defaultEscape });
 
   const prev = document.getElementById('prevMonth');
   const next = document.getElementById('nextMonth');
 
   prev?.addEventListener('click', () => {
     currentCalendarDate.setMonth(currentCalendarDate.getMonth() - 1);
-    calendarContainer.innerHTML = createCalendar(requests, user, { escapeHtml: defaultEscape });
-    initializeCalendar(requests, user, { document, showRequestModal, requestsSource });
+    calendarContainer.innerHTML = createCalendar(renderRequests, user, { escapeHtml: defaultEscape });
+    initializeCalendar(renderRequests, user, { document, showRequestModal, requestsSource });
   });
 
   next?.addEventListener('click', () => {
     currentCalendarDate.setMonth(currentCalendarDate.getMonth() + 1);
-    calendarContainer.innerHTML = createCalendar(requests, user, { escapeHtml: defaultEscape });
-    initializeCalendar(requests, user, { document, showRequestModal, requestsSource });
+    calendarContainer.innerHTML = createCalendar(renderRequests, user, { escapeHtml: defaultEscape });
+    initializeCalendar(renderRequests, user, { document, showRequestModal, requestsSource });
   });
 
   calendarContainer.querySelectorAll('.calendar-event').forEach((eventElement) => {
