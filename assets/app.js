@@ -1,11 +1,16 @@
 import { jsPDF } from 'jspdf';
 import { escapeHtml, safeTrim } from '../src/utils/string.js';
-import { formatDate, uid, combineDateTime, getDateInputValue } from '../src/utils/misc.js';
+import { formatDate, uid, combineDateTime, getDateInputValue, formatFileSize } from '../src/utils/misc.js';
 import { clone, announce } from '../src/utils/dom.js';
 import { buildRequestTable } from '../src/components/requests.js';
 import { timelineItem } from '../src/components/timeline.js';
 import { attachRequestModalHandlers as attachModalHandlers, showRequestModal as showModal } from '../src/components/modal.js';
 import { metricCard, buildStatusFilterTab, createSearchInterface } from '../src/components/ui.js';
+import { handleStatusUpdate } from '../src/handlers/status.js';
+import { handleProgressUpdate } from '../src/handlers/progress.js';
+import { handleReportSubmission } from '../src/handlers/report.js';
+import { handleClientNote, setupClientManagement, handleRequestEdit, handleRequestDelete } from '../src/handlers/client.js';
+import { createUploadArea, initializeUploadArea, handleFileUpload, renderEvidenceGallery, removeEvidence, viewEvidence } from '../src/components/upload.js';
 
 const STORAGE_KEY = "guardcan:data:v1";
 const SESSION_KEY = "guardcan:session";
@@ -453,6 +458,19 @@ function renderClientDashboard(user) {
       renderApp,
       announce,
       buildStatusChip,
+      safeTrim,
+      createTimelineEntry,
+      saveState,
+      showSuccessNotification,
+      showInfoNotification,
+      showErrorNotification,
+      showWarningNotification,
+      combineDateTime,
+      parseTags,
+      updateRequestDetailsInModal,
+      confirm: (msg) => confirm(msg),
+      state,
+      uid,
       findRequestById: (id) => state.requests.find((r) => r.id === id),
       findUserById: (id) => state.users.find((u) => u.id === id),
     })
@@ -685,7 +703,20 @@ function showRequestModal(request, viewer) {
   dialog.querySelector("[data-export]")?.addEventListener("click", () => exportReport(request));
 
   // Inicializar sistema de upload
-  initializeUploadArea(request.id, request);
+  const uploadHelpers = {
+    findRequestById: (id) => state.requests.find((r) => r.id === id),
+    findRequestByEvidenceId: (evidenceId) => state.requests.find((r) => r.evidence && r.evidence.find((e) => e.id === evidenceId)),
+    findUserById: (id) => state.users.find((u) => u.id === id),
+    showErrorNotification,
+    showSuccessNotification,
+    showWarningNotification,
+    uid,
+    saveState,
+    escapeHtml,
+    formatDate,
+    confirm: (msg) => confirm(msg),
+  };
+  initializeUploadArea(request.id, request, uploadHelpers);
 }
 
 function operatorActions(request, viewer) {
@@ -827,287 +858,7 @@ function clientActions(request, viewer) {
   `;
 }
 
-function handleStatusUpdate(event, request, operator, dialog) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const data = new FormData(form);
-  const status = data.get("status");
-  const notes = safeTrim(data.get("notes"));
-  const now = new Date().toISOString();
-
-  if (!status) return;
-
-  request.status = status;
-  request.updatedAt = now;
-  request.assignedOperatorId = operator.id;
-  const entry = createTimelineEntry({
-    actor: operator,
-    title: `Status atualizado para ${translateStatus(status)}`,
-    description: notes || "Status modificado sem observações adicionais.",
-    category: "status",
-  });
-  request.timeline.push(entry);
-
-  saveState();
-  const select = form.querySelector("#statusSelect");
-  if (select) select.value = status;
-  const notesField = form.querySelector("#statusNotes");
-  if (notesField) notesField.value = "";
-  const statusChip = dialog.querySelector(".modal__header .status-chip");
-  if (statusChip) statusChip.outerHTML = buildStatusChip(status);
-  const timeline = dialog.querySelector(".timeline");
-  if (timeline) timeline.insertAdjacentHTML("afterbegin", timelineItem(entry));
-  renderApp();
-  announce("Status atualizado com sucesso.");
-  showSuccessNotification(
-    "Status atualizado!",
-    `Solicitação ${request.id.toUpperCase()} agora está: ${translateStatus(status)}`,
-    4000
-  );
-}
-
-function handleProgressUpdate(event, request, operator, dialog) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const data = new FormData(form);
-  const title = safeTrim(data.get("title"));
-  const details = safeTrim(data.get("details"));
-  const next = safeTrim(data.get("next"));
-
-  if (!title || !details) return;
-
-  const entry = createTimelineEntry({
-    actor: operator,
-    title,
-    description: `${details}${next ? ` Próximos passos: ${next}.` : ""}`,
-    category: "operation",
-  });
-  request.timeline.push(entry);
-  request.updatedAt = new Date().toISOString();
-  request.assignedOperatorId = operator.id;
-
-  saveState();
-  form.reset();
-  const timeline = dialog.querySelector(".timeline");
-  if (timeline) timeline.insertAdjacentHTML("afterbegin", timelineItem(entry));
-  announce("Checkpoint registrado.");
-  showInfoNotification(
-    "Checkpoint registrado!",
-    `Nova atualização adicionada à solicitação ${request.id.toUpperCase()}`,
-    4000
-  );
-  renderApp();
-}
-
-function handleReportSubmission(event, request, operator, dialog) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const data = new FormData(form);
-  const summary = safeTrim(data.get("summary"));
-  const findings = safeTrim(data.get("findings"));
-  const recommendations = safeTrim(data.get("recommendations"));
-
-  if (!summary || !findings || !recommendations) {
-    announce("Preencha todos os campos do relatório.");
-    return;
-  }
-
-  request.report = {
-    summary,
-    findings,
-    recommendations,
-    generatedAt: new Date().toISOString(),
-    operatorId: operator.id,
-  };
-  request.status = "completed";
-  request.updatedAt = new Date().toISOString();
-  request.assignedOperatorId = operator.id;
-  request.timeline.push(
-    createTimelineEntry({
-      actor: operator,
-      title: "Relatório final registrado",
-      description: "Missão concluída e relatório disponibilizado ao cliente.",
-      category: "report",
-    })
-  );
-
-  saveState();
-  dialog.close();
-  announce("Relatório final salvo e missão concluída.");
-  showSuccessNotification(
-    "Missão concluída!",
-    `Relatório final da solicitação ${request.id.toUpperCase()} foi enviado com sucesso`,
-    6000
-  );
-}
-
-function handleClientNote(event, request, client, dialog) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const data = new FormData(form);
-  const note = safeTrim(data.get("note"));
-  if (!note) return;
-
-  const entry = createTimelineEntry({
-    actor: client,
-    title: "Cliente adicionou observação",
-    description: note,
-    category: "client",
-  });
-  request.timeline.push(entry);
-  request.updatedAt = new Date().toISOString();
-  saveState();
-  form.reset();
-  const timeline = dialog.querySelector(".timeline");
-  if (timeline) timeline.insertAdjacentHTML("afterbegin", timelineItem(entry));
-  announce("Mensagem adicionada ao histórico.");
-  renderApp();
-}
-
-function setupClientManagement(dialog, request, client) {
-  const editToggle = dialog.querySelector("[data-toggle-edit]");
-  const editFormContainer = dialog.querySelector("[data-edit-form]");
-  const editForm = dialog.querySelector("#editRequestForm");
-
-  if (editToggle && editFormContainer) {
-    editToggle.addEventListener("click", () => {
-      const isHidden = editFormContainer.hasAttribute("hidden");
-      if (isHidden) {
-        editFormContainer.removeAttribute("hidden");
-        editToggle.textContent = "Fechar edição";
-      } else {
-        editFormContainer.setAttribute("hidden", "");
-        editToggle.textContent = "Editar solicitação";
-      }
-    });
-  }
-
-  editForm?.addEventListener("submit", (event) =>
-    handleRequestEdit(event, request, client, dialog, editToggle, editFormContainer)
-  );
-
-  dialog
-    .querySelector("[data-delete-request]")
-    ?.addEventListener("click", () => handleRequestDelete(request, dialog));
-}
-
-function handleRequestEdit(event, request, client, dialog, toggleButton, formContainer) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const data = new FormData(form);
-
-  const title = safeTrim(data.get("title"));
-  const port = safeTrim(data.get("port"));
-  const vessel = safeTrim(data.get("vessel"));
-  const cargo = safeTrim(data.get("cargo")) || "Não informado";
-  const description = safeTrim(data.get("description"));
-  const scheduledDateValue = typeof data.get("scheduledFor") === "string" ? data.get("scheduledFor") : "";
-  const scheduledTimeValue = typeof data.get("scheduledTime") === "string" ? data.get("scheduledTime") : "";
-  const scheduledFor = combineDateTime(scheduledDateValue, scheduledTimeValue);
-  const tags = parseTags(data.get("tags"));
-
-  // Validação de data na edição
-  if (scheduledDateValue && scheduledTimeValue) {
-    const scheduledDateTime = new Date(scheduledFor);
-    const now = new Date();
-    const originalDateTime = new Date(request.scheduledFor);
-
-    if (scheduledDateTime < now) {
-      showErrorNotification(
-        "Data inválida",
-        "Não é possível agendar inspeções no passado. Selecione uma data futura.",
-        6000
-      );
-      return;
-    }
-
-    // Aviso se a data foi alterada significativamente
-    const diffHours = Math.abs(scheduledDateTime - originalDateTime) / (1000 * 60 * 60);
-    if (diffHours > 24) {
-      showWarningNotification(
-        "Data alterada",
-        `A data da inspeção foi alterada de ${formatDate(originalDateTime)} para ${formatDate(scheduledDateTime)}`,
-        5000
-      );
-    }
-  }
-
-  if (!title || !port || !vessel || !description || !scheduledFor) {
-    announce("Preencha todos os campos obrigatórios antes de salvar.");
-    return;
-  }
-
-  request.title = title;
-  request.port = port;
-  request.vessel = vessel;
-  request.cargo = cargo;
-  request.description = description;
-  request.scheduledFor = scheduledFor;
-  request.tags = tags;
-  request.updatedAt = new Date().toISOString();
-
-  const entry = createTimelineEntry({
-    actor: client,
-    title: "Cliente atualizou a solicitação",
-    description: "Detalhes do serviço revisados pelo solicitante.",
-    category: "client",
-  });
-  request.timeline.push(entry);
-
-  saveState();
-  updateRequestDetailsInModal(dialog, request);
-
-  const timeline = dialog.querySelector(".timeline");
-  if (timeline) timeline.insertAdjacentHTML("afterbegin", timelineItem(entry));
-
-  if (toggleButton && formContainer) {
-    formContainer.setAttribute("hidden", "");
-    toggleButton.textContent = "Editar solicitação";
-  }
-
-  form.querySelector("textarea")?.blur();
-  announce("Solicitação atualizada com sucesso.");
-  renderApp();
-
-  const descriptionField = form.querySelector("#editDescription");
-  if (descriptionField) descriptionField.value = description;
-  const titleField = form.querySelector("#editTitle");
-  if (titleField) titleField.value = title;
-  const portField = form.querySelector("#editPort");
-  if (portField) portField.value = port;
-  const vesselField = form.querySelector("#editVessel");
-  if (vesselField) vesselField.value = vessel;
-  const cargoField = form.querySelector("#editCargo");
-  if (cargoField) cargoField.value = cargo === "Não informado" ? "" : cargo;
-  const dateField = form.querySelector("#editDate");
-  if (dateField) dateField.value = scheduledDateValue;
-  const timeField = form.querySelector("#editTime");
-  if (timeField) timeField.value = scheduledTimeValue;
-  const tagsField = form.querySelector("#editTags");
-  if (tagsField) tagsField.value = tags.join(", ");
-}
-
-function handleRequestDelete(request, dialog) {
-  const confirmed = window.confirm(
-    "Tem certeza que deseja excluir esta solicitação? Esta ação não pode ser desfeita."
-  );
-  if (!confirmed) return;
-
-  const index = state.requests.findIndex((item) => item.id === request.id);
-  if (index >= 0) {
-    state.requests.splice(index, 1);
-    saveState();
-  }
-
-  dialog.close();
-  renderApp();
-  announce("Solicitação removida. A equipe será notificada.");
-  showWarningNotification(
-    "Solicitação removida",
-    `A solicitação ${request.id.toUpperCase()} foi excluída permanentemente`,
-    5000
-  );
-}
+// Client management handlers moved to `src/handlers/client.js`
 
 function buildMetrics(requests) {
   const total = requests.length;
@@ -1202,19 +953,7 @@ function buildStatusChip(status) {
 
 // `buildStatusFilterTab` moved to `src/components/ui.js`
 
-function timelineItem(event) {
-  return `
-    <article class="timeline__item">
-      <header>
-        <strong>${escapeHtml(event.title)}</strong>
-      </header>
-      <p>${escapeHtml(event.description)}</p>
-      <p class="timeline__meta">${formatDate(event.timestamp)} • ${escapeHtml(
-        event.actor?.name || "Usuário"
-      )}</p>
-    </article>
-  `;
-}
+// timelineItem moved to `src/components/timeline.js`
 
 function createTimelineEntry({ actor, title, description, category }) {
   return {
@@ -1496,18 +1235,7 @@ function saveSession() {
 
 // `uid` implementation moved to `src/utils/misc.js`
 
-function announce(message) {
-  const regionId = "guardcan-live";
-  let region = document.getElementById(regionId);
-  if (!region) {
-    region = document.createElement("div");
-    region.id = regionId;
-    region.className = "sr-only";
-    region.setAttribute("aria-live", "polite");
-    document.body.appendChild(region);
-  }
-  region.textContent = message;
-}
+// announce moved to `src/utils/dom.js`
 
 // Sistema de Notificações Visuais
 function showNotification(title, message, type = "info", duration = 5000) {
@@ -1587,209 +1315,6 @@ function showInfoNotification(title, message, duration = 4000) {
   return showNotification(title, message, "info", duration);
 }
 
-// Sistema de Upload de Evidências
-function createUploadArea(requestId) {
-  return `
-    <div class="card" style="box-shadow:none; border:1px solid var(--border); background: var(--surface-alt);" aria-label="Evidências da operação">
-      <h4>Evidências da operação</h4>
-      <p>Adicione fotos, documentos ou outros arquivos relevantes para esta inspeção.</p>
-      
-      <div class="upload-area" id="uploadArea-${requestId}">
-        <input type="file" id="fileInput-${requestId}" multiple accept="image/*,.pdf,.doc,.docx,.txt" />
-        <div class="upload-icon">📁</div>
-        <p class="upload-text">Clique aqui ou arraste arquivos para adicionar evidências</p>
-        <p class="upload-hint">Formatos aceitos: JPG, PNG, PDF, DOC, TXT (máx. 10MB por arquivo)</p>
-      </div>
-      
-      <div class="evidence-gallery" id="evidenceGallery-${requestId}">
-        <!-- Evidências serão inseridas aqui -->
-      </div>
-    </div>
-  `;
-}
-
-function initializeUploadArea(requestId, request) {
-  const uploadArea = document.getElementById(`uploadArea-${requestId}`);
-  const fileInput = document.getElementById(`fileInput-${requestId}`);
-  const gallery = document.getElementById(`evidenceGallery-${requestId}`);
-  
-  if (!uploadArea || !fileInput || !gallery) return;
-
-  // Inicializar evidências existentes
-  if (request.evidence && request.evidence.length > 0) {
-    renderEvidenceGallery(request.evidence, gallery, requestId);
-  }
-
-  // Drag and drop
-  uploadArea.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    uploadArea.classList.add('dragover');
-  });
-
-  uploadArea.addEventListener('dragleave', () => {
-    uploadArea.classList.remove('dragover');
-  });
-
-  uploadArea.addEventListener('drop', (e) => {
-    e.preventDefault();
-    uploadArea.classList.remove('dragover');
-    handleFileUpload(e.dataTransfer.files, requestId);
-  });
-
-  // Click para selecionar arquivos
-  uploadArea.addEventListener('click', () => {
-    fileInput.click();
-  });
-
-  // Mudança no input de arquivo
-  fileInput.addEventListener('change', (e) => {
-    handleFileUpload(e.target.files, requestId);
-    fileInput.value = ''; // Limpar input
-  });
-}
-
-function handleFileUpload(files, requestId) {
-  const request = state.requests.find(r => r.id === requestId);
-  if (!request) return;
-
-  // Inicializar array de evidências se não existir
-  if (!request.evidence) {
-    request.evidence = [];
-  }
-
-  Array.from(files).forEach(file => {
-    // Validar tamanho (10MB)
-    if (file.size > 10 * 1024 * 1024) {
-      showErrorNotification(
-        "Arquivo muito grande",
-        `O arquivo "${file.name}" excede o limite de 10MB`,
-        5000
-      );
-      return;
-    }
-
-    // Validar tipo
-    const allowedTypes = ['image/jpeg', 'image/png', 'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain'];
-    if (!allowedTypes.includes(file.type)) {
-      showErrorNotification(
-        "Tipo de arquivo não permitido",
-        `O arquivo "${file.name}" não é um tipo suportado`,
-        5000
-      );
-      return;
-    }
-
-    // Criar evidência
-    const evidence = {
-      id: uid("evidence"),
-      name: file.name,
-      size: file.size,
-      type: file.type,
-      uploadedAt: new Date().toISOString(),
-      data: null // Será preenchido após leitura
-    };
-
-    // Ler arquivo
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      evidence.data = e.target.result;
-      request.evidence.push(evidence);
-      saveState();
-      renderEvidenceGallery(request.evidence, document.getElementById(`evidenceGallery-${requestId}`), requestId);
-      showSuccessNotification(
-        "Evidência adicionada",
-        `Arquivo "${file.name}" foi adicionado com sucesso`,
-        3000
-      );
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
-function renderEvidenceGallery(evidenceList, gallery, requestId) {
-  if (!gallery || !evidenceList) return;
-
-  gallery.innerHTML = evidenceList.map(evidence => {
-    const isImage = evidence.type.startsWith('image/');
-    const fileSize = formatFileSize(evidence.size);
-    
-    return `
-      <div class="evidence-item" data-evidence-id="${evidence.id}">
-        ${isImage ? 
-          `<img src="${evidence.data}" alt="${escapeHtml(evidence.name)}" class="evidence-preview">` :
-          `<div class="file-icon">📄</div>`
-        }
-        <div class="evidence-info">
-          <div class="evidence-name">${escapeHtml(evidence.name)}</div>
-          <div>${fileSize} • ${formatDate(evidence.uploadedAt)}</div>
-        </div>
-        <div class="evidence-actions">
-          ${isImage ? `<button class="evidence-action" onclick="viewEvidence('${evidence.id}')" title="Visualizar">👁️</button>` : ''}
-          <button class="evidence-action danger" onclick="removeEvidence('${evidence.id}', '${requestId}')" title="Remover">🗑️</button>
-        </div>
-      </div>
-    `;
-  }).join('');
-}
-
-function removeEvidence(evidenceId, requestId) {
-  const request = state.requests.find(r => r.id === requestId);
-  if (!request || !request.evidence) return;
-
-  const evidence = request.evidence.find(e => e.id === evidenceId);
-  if (!evidence) return;
-
-  if (confirm(`Tem certeza que deseja remover a evidência "${evidence.name}"?`)) {
-    request.evidence = request.evidence.filter(e => e.id !== evidenceId);
-    saveState();
-    renderEvidenceGallery(request.evidence, document.getElementById(`evidenceGallery-${requestId}`), requestId);
-    showWarningNotification(
-      "Evidência removida",
-      `O arquivo "${evidence.name}" foi removido`,
-      3000
-    );
-  }
-}
-
-function viewEvidence(evidenceId) {
-  const request = state.requests.find(r => r.evidence && r.evidence.find(e => e.id === evidenceId));
-  if (!request) return;
-
-  const evidence = request.evidence.find(e => e.id === evidenceId);
-  if (!evidence || !evidence.type.startsWith('image/')) return;
-
-  // Criar modal para visualizar imagem
-  const modal = document.createElement('dialog');
-  modal.className = 'modal';
-  modal.innerHTML = `
-    <div class="modal__header">
-      <h3>${escapeHtml(evidence.name)}</h3>
-      <button class="notification__close" onclick="this.closest('dialog').close()">×</button>
-    </div>
-    <div class="modal__body">
-      <img src="${evidence.data}" alt="${escapeHtml(evidence.name)}" style="width: 100%; max-height: 70vh; object-fit: contain;">
-      <p style="margin-top: 1rem; color: var(--text-secondary);">
-        Tamanho: ${formatFileSize(evidence.size)} • 
-        Adicionado em: ${formatDate(evidence.uploadedAt)}
-      </p>
-    </div>
-  `;
-  
-  document.body.appendChild(modal);
-  modal.showModal();
-  
-  modal.addEventListener('close', () => {
-    modal.remove();
-  });
-}
-
-function formatFileSize(bytes) {
-  if (bytes === 0) return '0 Bytes';
-  const k = 1024;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
 
 // Sistema de Calendário Visual
 let currentCalendarDate = new Date();
@@ -1907,69 +1432,7 @@ function initializeCalendar(requests, user) {
   });
 }
 
-// Sistema de Busca Avançada
-function createSearchInterface() {
-  return `
-    <div class="search-container">
-      <div class="search-header">
-        <h3 class="search-title">Busca Avançada</h3>
-        <button class="search-toggle" id="toggleSearch" type="button">
-          <span id="searchToggleText">Mostrar filtros</span>
-        </button>
-      </div>
-      
-      <form id="searchForm" class="search-form" hidden>
-        <div class="search-field">
-          <label for="searchText">Texto</label>
-          <input id="searchText" type="text" placeholder="Buscar por título, descrição, porto..." />
-        </div>
-        
-        <div class="search-field">
-          <label for="searchStatus">Status</label>
-          <select id="searchStatus">
-            <option value="">Todos os status</option>
-            <option value="pending">Pendente</option>
-            <option value="in-progress">Em andamento</option>
-            <option value="completed">Concluída</option>
-          </select>
-        </div>
-        
-        <div class="search-field">
-          <label for="searchDateFrom">Data inicial</label>
-          <input id="searchDateFrom" type="date" />
-        </div>
-        
-        <div class="search-field">
-          <label for="searchDateTo">Data final</label>
-          <input id="searchDateTo" type="date" />
-        </div>
-        
-        <div class="search-field">
-          <label for="searchPort">Porto</label>
-          <input id="searchPort" type="text" placeholder="Nome do porto" />
-        </div>
-        
-        <div class="search-field">
-          <label for="searchVessel">Embarcação</label>
-          <input id="searchVessel" type="text" placeholder="Nome da embarcação" />
-        </div>
-        
-        <div class="search-actions">
-          <button type="button" class="ghost-button" id="clearSearch">Limpar</button>
-          <button type="submit" class="primary-button">Buscar</button>
-        </div>
-      </form>
-      
-      <div id="searchResults" class="search-results" hidden>
-        <div class="search-results-header">
-          <span class="search-results-count" id="searchResultsCount"></span>
-          <button class="search-clear" id="clearSearchResults">Limpar resultados</button>
-        </div>
-        <div id="searchResultsList"></div>
-      </div>
-    </div>
-  `;
-}
+// createSearchInterface moved to `src/components/ui.js`
 
 function initializeSearch() {
   const searchForm = document.getElementById('searchForm');

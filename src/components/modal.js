@@ -93,11 +93,11 @@ export function showRequestModal(request, viewer, helpers) {
     dialog.querySelector('#reportForm')?.addEventListener('submit', (e)=>handleReportSubmission(e, request, viewer, dialog));
   } else {
     dialog.querySelector('#clientNoteForm')?.addEventListener('submit', (e)=>handleClientNote(e, request, viewer, dialog));
-    setupClientManagement(dialog, request, viewer);
+      setupClientManagement(dialog, request, viewer, helpers);
   }
 
   dialog.querySelector('[data-export]')?.addEventListener('click', () => exportReport(request));
 
-  initializeUploadArea(request.id, request);
+  initializeUploadArea(request.id, request, helpers);
   announce('Modal aberto');
 }
