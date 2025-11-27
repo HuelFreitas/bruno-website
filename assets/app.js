@@ -2,8 +2,9 @@ import { jsPDF } from 'jspdf';
 import { escapeHtml, safeTrim } from '../src/utils/string.js';
 import { formatDate, uid, combineDateTime, getDateInputValue, formatFileSize } from '../src/utils/misc.js';
 import { clone, announce } from '../src/utils/dom.js';
+import { getTimeInputValue, parseTags, translateStatus, resolveUser } from '../src/utils/helpers.js';
 import { buildRequestTable } from '../src/components/requests.js';
-import { timelineItem } from '../src/components/timeline.js';
+import { timelineItem, createTimelineEntry, updateRequestDetailsInModal } from '../src/components/timeline.js';
 import { createCalendar, initializeCalendar as initCalendar } from '../src/components/calendar.js';
 import { attachRequestModalHandlers as attachModalHandlers, showRequestModal as showModal } from '../src/components/modal.js';
 import { metricCard, buildStatusFilterTab, createSearchInterface } from '../src/components/ui.js';
@@ -22,6 +23,9 @@ const SESSION_KEY = "guardcan:session";
 const THEME_KEY = "guardcan:theme";
 
 // `clone` moved to `src/utils/dom.js`
+
+// Wrapper para resolveUser que injeta state.users
+const resolveUserWrapper = (id) => resolveUser(id, state.users);
 
 const companyAvailability = [
   { value: "08:00", label: "08:00 - 10:00", description: "Inspeções matinais com dupla K9" },
@@ -636,7 +640,7 @@ function showRequestModal(request, viewer) {
   const assignedOperator = request.assignedOperatorId
     ? state.users.find((user) => user.id === request.assignedOperatorId)
     : null;
-  const client = resolveUser(request.clientId);
+  const client = resolveUserWrapper(request.clientId);
 
   const safeRequestIdBadge = escapeHtml(request.id.toUpperCase());
   const safeTitle = escapeHtml(request.title);
@@ -895,7 +899,7 @@ function buildOperatorBoard(requests, viewer) {
     <div class="section-grid">
       ${requests
         .map((request) => {
-          const client = resolveUser(request.clientId);
+          const client = resolveUserWrapper(request.clientId);
           const safeTitle = escapeHtml(request.title);
           const safeBadgeId = escapeHtml(request.id.toUpperCase());
           const safePort = escapeHtml(request.port);
@@ -945,94 +949,10 @@ function buildStatusChip(status) {
 
 // timelineItem moved to `src/components/timeline.js`
 
-function createTimelineEntry({ actor, title, description, category }) {
-  return {
-    id: uid("event"),
-    timestamp: new Date().toISOString(),
-    actor: {
-      id: actor.id,
-      name: actor.name,
-      role: actor.role,
-    },
-    title,
-    description,
-    category,
-  };
-}
-
-
-
-function getTimeInputValue(value) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  return `${hours}:${minutes}`;
-}
-
-function updateRequestDetailsInModal(dialog, request) {
-  const titleField = dialog.querySelector('[data-field="title"]');
-  if (titleField) titleField.textContent = request.title;
-
-  const summaryField = dialog.querySelector('[data-field="header-summary"]');
-  if (summaryField) summaryField.textContent = `${request.port} • ${request.vessel}`;
-
-  const portField = dialog.querySelector('[data-field="port"]');
-  if (portField) portField.textContent = request.port;
-
-  const vesselField = dialog.querySelector('[data-field="vessel"]');
-  if (vesselField) vesselField.textContent = request.vessel;
-
-  const cargoField = dialog.querySelector('[data-field="cargo"]');
-  if (cargoField) cargoField.textContent = request.cargo || "Não informado";
-
-  const descriptionField = dialog.querySelector('[data-field="description"]');
-  if (descriptionField) descriptionField.textContent = request.description;
-
-  const scheduleField = dialog.querySelector('[data-field="schedule"]');
-  if (scheduleField) scheduleField.textContent = formatDate(request.scheduledFor);
-
-  const tagsContainer = dialog.querySelector('[data-field="tags"]');
-  if (tagsContainer) {
-    if (request.tags?.length) {
-      tagsContainer.innerHTML = request.tags
-        .map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`)
-        .join("");
-      tagsContainer.removeAttribute("hidden");
-    } else {
-      tagsContainer.innerHTML = "";
-      tagsContainer.setAttribute("hidden", "");
-    }
-  }
-}
-
-function parseTags(raw) {
-  if (!raw) return [];
-  return raw
-    .split(",")
-    .map((tag) => tag.trim())
-    .filter(Boolean);
-}
-
-
-
-function translateStatus(status) {
-  return {
-    pending: "Pendente",
-    "in-progress": "Em andamento",
-    completed: "Concluída",
-  }[status] || "Pendente";
-}
-
-function resolveUser(id) {
-  return state.users.find((user) => user.id === id) || { name: "Usuário" };
-}
-
 function exportReport(request) {
   if (!request.report) return;
-  const client = resolveUser(request.clientId);
-  const operator = resolveUser(request.report.operatorId || request.assignedOperatorId);
+  const client = resolveUserWrapper(request.clientId);
+  const operator = resolveUserWrapper(request.report.operatorId || request.assignedOperatorId);
 
   // Usar exclusivamente o import ESM `jsPDF` (dependência explícita em package.json)
   if (typeof jsPDF === 'undefined') {
