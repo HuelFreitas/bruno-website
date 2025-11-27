@@ -7,6 +7,7 @@ import { timelineItem } from '../src/components/timeline.js';
 import { createCalendar, initializeCalendar as initCalendar } from '../src/components/calendar.js';
 import { attachRequestModalHandlers as attachModalHandlers, showRequestModal as showModal } from '../src/components/modal.js';
 import { metricCard, buildStatusFilterTab, createSearchInterface } from '../src/components/ui.js';
+import { initializeSearch as initSearchModule, performSearch as performSearchModule, displaySearchResults as displaySearchResultsModule } from '../src/components/search.js';
 import { handleStatusUpdate } from '../src/handlers/status.js';
 import { handleProgressUpdate } from '../src/handlers/progress.js';
 import { handleReportSubmission } from '../src/handlers/report.js';
@@ -14,6 +15,7 @@ import { handleClientNote, setupClientManagement, handleRequestEdit, handleReque
 import { createUploadArea, initializeUploadArea, handleFileUpload, renderEvidenceGallery, removeEvidence, viewEvidence } from '../src/components/upload.js';
 import { showNotification, hideNotification, showSuccessNotification, showErrorNotification, showWarningNotification, showInfoNotification } from '../src/ui/notifications.js';
 import { loadTheme as loadThemeFromStorage, applyTheme as applyThemeToDOM, toggleTheme as toggleThemeInDOM } from '../src/ui/theme.js';
+import { buildMetrics, buildOperatorMetrics } from '../src/handlers/metrics.js';
 
 const STORAGE_KEY = "guardcan:data:v1";
 const SESSION_KEY = "guardcan:session";
@@ -486,7 +488,26 @@ function renderClientDashboard(user) {
   
   // Inicializar busca avançada (com delay para garantir que o DOM esteja pronto)
   setTimeout(() => {
-    initializeSearch();
+    const performSearchWrapper = () => {
+      performSearchModule({
+        state,
+        session,
+        showSuccessNotification,
+        displaySearchResults: (reqs, usr, hlp) => {
+          displaySearchResultsModule(reqs, usr, {
+            resolveUser,
+            buildStatusChip,
+            showRequestModal: sharedShowModal,
+            state,
+            ...hlp,
+          });
+        },
+      });
+    };
+    initSearchModule({
+      showInfoNotification,
+      performSearch: performSearchWrapper,
+    });
   }, 100);
 }
 
@@ -865,43 +886,7 @@ function clientActions(request, viewer) {
 
 // Client management handlers moved to `src/handlers/client.js`
 
-function buildMetrics(requests) {
-  const total = requests.length;
-  const inProgress = requests.filter((item) => item.status === "in-progress").length;
-  const completed = requests.filter((item) => item.status === "completed").length;
-  const upcomingDates = requests
-    .map((item) => item.scheduledFor)
-    .filter(Boolean)
-    .map((date) => new Date(date))
-    .filter((date) => date >= new Date());
-  const nextInspection = upcomingDates.sort((a, b) => a - b)[0];
-
-  return {
-    total,
-    inProgress,
-    completed,
-    nextInspectionLabel: nextInspection ? formatDate(nextInspection.toISOString()) : "Sem agenda",
-  };
-}
-
-function buildOperatorMetrics(requests, operatorId) {
-  const assignedToOperator = requests.filter((request) => request.assignedOperatorId === operatorId).length;
-  const pending = requests.filter((request) => request.status === "pending").length;
-  const completed = requests.filter((request) => request.status === "completed").length;
-  const upcomingDates = requests
-    .map((item) => item.scheduledFor)
-    .filter(Boolean)
-    .map((date) => new Date(date))
-    .filter((date) => date >= new Date());
-  const nextInspection = upcomingDates.sort((a, b) => a - b)[0];
-
-  return {
-    assignedToOperator,
-    pending,
-    completed,
-    nextInspectionLabel: nextInspection ? formatDate(nextInspection.toISOString()) : "Sem agenda",
-  };
-}
+// Metrics handlers moved to `src/handlers/metrics.js` (imported above)
 
 // `buildRequestTable` moved to `src/components/requests.js` (imported above)
 
@@ -1241,218 +1226,7 @@ function saveSession() {
 // Sistema de Notificações Visuais
 // (moved to `src/ui/notifications.js`)
 
-// createSearchInterface moved to `src/components/ui.js`
-
-function initializeSearch() {
-  const searchForm = document.getElementById('searchForm');
-  const toggleButton = document.getElementById('toggleSearch');
-  const toggleText = document.getElementById('searchToggleText');
-  const clearButton = document.getElementById('clearSearch');
-  const clearResultsButton = document.getElementById('clearSearchResults');
-  const searchResults = document.getElementById('searchResults');
-  
-  if (!searchForm || !toggleButton) {
-    console.log('Elementos de busca não encontrados');
-    return;
-  }
-  
-  // Remover event listeners anteriores se existirem
-  const newToggleButton = toggleButton.cloneNode(true);
-  toggleButton.parentNode.replaceChild(newToggleButton, toggleButton);
-  
-  // Toggle do formulário de busca
-  newToggleButton.addEventListener('click', () => {
-    const isHidden = searchForm.hasAttribute('hidden');
-    const currentToggleText = document.getElementById('searchToggleText');
-    
-    if (isHidden) {
-      searchForm.removeAttribute('hidden');
-      if (currentToggleText) currentToggleText.textContent = 'Ocultar filtros';
-      showInfoNotification(
-        "Filtros ativados",
-        "Use os filtros para encontrar solicitações específicas",
-        3000
-      );
-    } else {
-      searchForm.setAttribute('hidden', '');
-      if (currentToggleText) currentToggleText.textContent = 'Mostrar filtros';
-    }
-  });
-  
-  // Limpar busca
-  clearButton?.addEventListener('click', () => {
-    searchForm.reset();
-    if (searchResults) searchResults.setAttribute('hidden', '');
-    showInfoNotification(
-      "Filtros limpos",
-      "Todos os filtros foram removidos",
-      2000
-    );
-  });
-  
-  clearResultsButton?.addEventListener('click', () => {
-    if (searchResults) searchResults.setAttribute('hidden', '');
-    searchForm.reset();
-    showInfoNotification(
-      "Resultados limpos",
-      "Busca cancelada e filtros limpos",
-      2000
-    );
-  });
-  
-  // Submissão da busca
-  searchForm.addEventListener('submit', (event) => {
-    event.preventDefault();
-    performSearch();
-  });
-  
-  console.log('Sistema de busca inicializado com sucesso');
-}
-
-function performSearch() {
-  const searchText = document.getElementById('searchText')?.value || '';
-  const searchStatus = document.getElementById('searchStatus')?.value || '';
-  const searchDateFrom = document.getElementById('searchDateFrom')?.value || '';
-  const searchDateTo = document.getElementById('searchDateTo')?.value || '';
-  const searchPort = document.getElementById('searchPort')?.value || '';
-  const searchVessel = document.getElementById('searchVessel')?.value || '';
-  
-  const currentUser = state.users.find(user => user.id === session?.currentUserId);
-  if (!currentUser) return;
-  
-  let filteredRequests = state.requests;
-  
-  // Filtrar por usuário
-  if (currentUser.role === 'client') {
-    filteredRequests = filteredRequests.filter(request => request.clientId === currentUser.id);
-  }
-  
-  // Aplicar filtros
-  if (searchText) {
-    const searchLower = searchText.toLowerCase();
-    filteredRequests = filteredRequests.filter(request => 
-      request.title.toLowerCase().includes(searchLower) ||
-      request.description.toLowerCase().includes(searchLower) ||
-      request.port.toLowerCase().includes(searchLower)
-    );
-  }
-  
-  if (searchStatus) {
-    filteredRequests = filteredRequests.filter(request => request.status === searchStatus);
-  }
-  
-  if (searchDateFrom) {
-    const fromDate = new Date(searchDateFrom);
-    filteredRequests = filteredRequests.filter(request => 
-      new Date(request.scheduledFor) >= fromDate
-    );
-  }
-  
-  if (searchDateTo) {
-    const toDate = new Date(searchDateTo);
-    toDate.setHours(23, 59, 59, 999);
-    filteredRequests = filteredRequests.filter(request => 
-      new Date(request.scheduledFor) <= toDate
-    );
-  }
-  
-  if (searchPort) {
-    const portLower = searchPort.toLowerCase();
-    filteredRequests = filteredRequests.filter(request => 
-      request.port.toLowerCase().includes(portLower)
-    );
-  }
-  
-  if (searchVessel) {
-    const vesselLower = searchVessel.toLowerCase();
-    filteredRequests = filteredRequests.filter(request => 
-      request.vessel.toLowerCase().includes(vesselLower)
-    );
-  }
-  
-  // Exibir resultados
-  displaySearchResults(filteredRequests, currentUser);
-  
-  // Notificação de busca realizada
-  showSuccessNotification(
-    "Busca realizada",
-    `Encontrados ${filteredRequests.length} resultado(s)`,
-    3000
-  );
-}
-
-function displaySearchResults(requests, user) {
-  const searchResults = document.getElementById('searchResults');
-  const searchResultsCount = document.getElementById('searchResultsCount');
-  const searchResultsList = document.getElementById('searchResultsList');
-  
-  if (!searchResults || !searchResultsCount || !searchResultsList) return;
-  
-  searchResults.removeAttribute('hidden');
-  searchResultsCount.textContent = `${requests.length} resultado(s) encontrado(s)`;
-  
-  if (requests.length === 0) {
-    searchResultsList.innerHTML = `
-      <div class="empty-state">
-        <h3>Nenhum resultado encontrado</h3>
-        <p>Tente ajustar os filtros de busca.</p>
-      </div>
-    `;
-    return;
-  }
-  
-  searchResultsList.innerHTML = `
-    <div class="table-wrapper">
-      <table class="table">
-        <thead>
-          <tr>
-            <th scope="col">Título</th>
-            <th scope="col">Data prevista</th>
-            <th scope="col">Status</th>
-            <th scope="col">Porto</th>
-            <th scope="col">Embarcação</th>
-            <th scope="col"><span class="sr-only">Ações</span></th>
-          </tr>
-        </thead>
-        <tbody>
-          ${requests.map(request => {
-            const operatorName = request.assignedOperatorId ? resolveUser(request.assignedOperatorId)?.name : "-";
-            const safeTitle = escapeHtml(request.title);
-            const safePort = escapeHtml(request.port);
-            const safeVessel = escapeHtml(request.vessel);
-            const safeRequestId = escapeHtml(request.id);
-            
-            return `
-              <tr>
-                <td>
-                  <strong>${safeTitle}</strong>
-                </td>
-                <td>${formatDate(request.scheduledFor)}</td>
-                <td>${buildStatusChip(request.status)}</td>
-                <td>${safePort}</td>
-                <td>${safeVessel}</td>
-                <td>
-                  <button class="secondary-button" type="button" data-request="${safeRequestId}">Detalhes</button>
-                </td>
-              </tr>
-            `;
-          }).join('')}
-        </tbody>
-      </table>
-    </div>
-  `;
-  
-  // Adicionar event listeners para os botões de detalhes
-  searchResultsList.querySelectorAll('[data-request]').forEach(button => {
-    button.addEventListener('click', () => {
-      const requestId = button.dataset.request;
-      const request = state.requests.find(r => r.id === requestId);
-      if (request) {
-        showRequestModal(request, user);
-      }
-    });
-  });
-}
+// Search functions moved to `src/components/search.js`
 
 function focusMain() {
   requestAnimationFrame(() => {
