@@ -3,6 +3,7 @@ import { escapeHtml, safeTrim } from '../src/utils/string.js';
 import { formatDate, uid, combineDateTime, getDateInputValue, formatFileSize } from '../src/utils/misc.js';
 import { clone, announce } from '../src/utils/dom.js';
 import { getTimeInputValue, parseTags, translateStatus, resolveUser } from '../src/utils/helpers.js';
+import { loadState as loadStateFromStorage, saveState as saveStateToStorage, loadSession as loadSessionFromStorage, saveSession as saveSessionToStorage } from '../src/utils/storage.js';
 import { buildRequestTable } from '../src/components/requests.js';
 import { timelineItem, createTimelineEntry, updateRequestDetailsInModal } from '../src/components/timeline.js';
 import { emptyState, buildOperatorBoard, renderClientDashboard, renderOperatorDashboard } from '../src/components/dashboards.js';
@@ -949,6 +950,14 @@ function exportReport(request) {
   }
 }
 
+// `loadState`, `saveState`, `loadSession`, `saveSession` moved to `src/utils/storage.js`
+
+// Wrapper functions to maintain compatibility
+const loadState = () => loadStateFromStorage(defaultState);
+const saveState = () => saveStateToStorage(state);
+const loadSession = () => loadSessionFromStorage();
+const saveSession = () => saveSessionToStorage(session);
+
 function handleLogout() {
   session = null;
   saveSession();
@@ -956,48 +965,6 @@ function handleLogout() {
   logoutButton.hidden = true; // Garantir que o botão sair seja escondido
   renderApp();
   focusMain();
-}
-
-function loadState() {
-  if (typeof localStorage === "undefined") {
-    return clone(defaultState);
-  }
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (!stored) return clone(defaultState);
-    const parsed = JSON.parse(stored);
-    return {
-      users: Array.isArray(parsed.users) ? parsed.users : clone(defaultState.users),
-      requests: Array.isArray(parsed.requests) ? parsed.requests : clone(defaultState.requests),
-    };
-  } catch (error) {
-    console.error("Erro ao carregar estado, utilizando padrão", error);
-    return clone(defaultState);
-  }
-}
-
-function saveState() {
-  if (typeof localStorage === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-}
-
-function loadSession() {
-  if (typeof localStorage === "undefined") return null;
-  try {
-    const stored = localStorage.getItem(SESSION_KEY);
-    return stored ? JSON.parse(stored) : null;
-  } catch (error) {
-    return null;
-  }
-}
-
-function saveSession() {
-  if (typeof localStorage === "undefined") return;
-  if (session) {
-    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  } else {
-    localStorage.removeItem(SESSION_KEY);
-  }
 }
 
 // Sistema de Notificações Visuais
