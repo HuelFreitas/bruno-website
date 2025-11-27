@@ -76,3 +76,18 @@ export function createSearchInterface() {
     </div>
   `;
 }
+
+/**
+ * Constrói um chip (badge) com status visual da requisição
+ * @param {string} status - Status da requisição (pending, in-progress, completed)
+ * @returns {string} HTML do chip de status
+ */
+export function buildStatusChip(status) {
+  const map = {
+    pending: { label: "Pendente", className: "status--pending" },
+    "in-progress": { label: "Em andamento", className: "status--in-progress" },
+    completed: { label: "Concluída", className: "status--completed" },
+  };
+  const entry = map[status] || map.pending;
+  return `<span class="status-chip ${entry.className}">${entry.label}</span>`;
+}

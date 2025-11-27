@@ -5,9 +5,10 @@ import { clone, announce } from '../src/utils/dom.js';
 import { getTimeInputValue, parseTags, translateStatus, resolveUser } from '../src/utils/helpers.js';
 import { buildRequestTable } from '../src/components/requests.js';
 import { timelineItem, createTimelineEntry, updateRequestDetailsInModal } from '../src/components/timeline.js';
+import { emptyState, buildOperatorBoard, renderClientDashboard, renderOperatorDashboard } from '../src/components/dashboards.js';
 import { createCalendar, initializeCalendar as initCalendar } from '../src/components/calendar.js';
 import { attachRequestModalHandlers as attachModalHandlers, showRequestModal as showModal } from '../src/components/modal.js';
-import { metricCard, buildStatusFilterTab, createSearchInterface } from '../src/components/ui.js';
+import { metricCard, buildStatusFilterTab, createSearchInterface, buildStatusChip } from '../src/components/ui.js';
 import { initializeSearch as initSearchModule, performSearch as performSearchModule, displaySearchResults as displaySearchResultsModule } from '../src/components/search.js';
 import { handleStatusUpdate } from '../src/handlers/status.js';
 import { handleProgressUpdate } from '../src/handlers/progress.js';
@@ -799,15 +800,7 @@ function emptyState(title, subtitle) {
   `;
 }
 
-function buildStatusChip(status) {
-  const map = {
-    pending: { label: "Pendente", className: "status--pending" },
-    "in-progress": { label: "Em andamento", className: "status--in-progress" },
-    completed: { label: "Concluída", className: "status--completed" },
-  };
-  const entry = map[status] || map.pending;
-  return `<span class="status-chip ${entry.className}">${entry.label}</span>`;
-}
+// `buildStatusChip` moved to `src/components/ui.js` (imported above)
 
 // `buildStatusFilterTab` moved to `src/components/ui.js`
 
