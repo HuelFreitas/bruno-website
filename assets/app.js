@@ -978,21 +978,12 @@ function focusMain() {
   });
 }
 
-function loadTheme() {
-  return loadThemeFromStorage(THEME_KEY);
-}
+// `loadTheme`, `applyTheme`, `toggleTheme`, `updateThemeToggleLabel` moved to `src/ui/theme.js`
 
-function applyTheme(theme) {
-  return applyThemeToDOM(theme, THEME_KEY, themeToggle);
-}
-
-function toggleTheme() {
-  toggleThemeInDOM(THEME_KEY, themeToggle);
-}
-
-function updateThemeToggleLabel(theme) {
-  // Now handled by applyTheme import
-}
+// Wrapper functions to maintain compatibility
+const loadTheme = () => loadThemeFromStorage(THEME_KEY);
+const applyTheme = (theme) => applyThemeToDOM(theme, THEME_KEY, themeToggle);
+const toggleTheme = () => toggleThemeInDOM(THEME_KEY, themeToggle);
 
 // Função para atualizar informações do usuário no header
 function updateUserInfo(user) {
