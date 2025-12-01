@@ -44,6 +44,63 @@ Observações:
 - Execute `npm install` antes de `npm run dev` para garantir que `jspdf` e outras dependências estejam instaladas.
 - Pull requests devem rodar CI (lint + tests) automaticamente.
 
+## 🧪 Testes & Qualidade de Código
+
+### Comandos de Teste
+
+```bash
+# Rodar testes uma vez
+npm test
+
+# Rodar testes em modo watch (hot reload)
+npm run test:watch
+
+# Gerar relatório de cobertura
+npm run test:coverage
+
+# Ver relatório de cobertura no navegador
+npm run coverage
+```
+
+### Métricas Atuais
+
+- **157 testes** implementados e passando (100%) ✅
+- **Cobertura global:** 37.14% statements (varia de 0% a 100% por módulo)
+- **Funções cobertas:** 76.56% | **Branches:** 68.34%
+- **Thresholds:** 80% statements/functions, 75% branches
+
+📊 [Relatório de Cobertura Detalhado](./coverage/index.html)
+
+### Estrutura de Testes
+
+```
+test/
+├── helpers.test.js       (36 testes) ✅
+├── storage.test.js       (26 testes) ✅
+├── theme.test.js         (25 testes) ✅
+├── notifications.test.js (22 testes) ✅
+├── dashboards.test.js    (6 testes)  ✅
+├── search.test.js        (9 testes)  ✅
+├── actions.test.js       (4 testes)  ✅
+└── ...outros             (~29 testes)✅
+```
+
+### CI/CD - GitHub Actions
+
+![Tests & Coverage](https://github.com/HuelFreitas/bruno-website/workflows/Tests%20&%20Coverage/badge.svg)
+
+Configurado para rodar **automaticamente em cada Pull Request**:
+
+- ✅ Linter (ESLint)
+- ✅ Testes (Vitest em Node 18.x e 20.x)
+- ✅ Cobertura (V8)
+- ✅ Codecov upload
+- ✅ Comentário automático no PR
+
+**Branch Protection:** `main` requer que todos os testes passem antes de merge.
+
+📚 [Guia de Contribuição](./CONTRIBUTING.md) | ⚡ [Referência Rápida](./QUICK_REFERENCE.md)
+
 1. Faça o download/clonagem do repositório.
    ```bash
    git clone https://github.com/<seu-usuario>/bruno-website.git
@@ -107,7 +164,30 @@ Observações:
 - Integrar API real para autenticação e persistência dos dados.
 - Adicionar upload de evidências (fotos, laudos) e assinatura digital.
 - Implementar fluxo de notificações por e-mail ou push.
-- Criar testes automatizados de interface para os principais fluxos.
+- Melhorar cobertura de testes para 80%+ nos módulos com baixa cobertura.
+
+## 🤝 Contribuindo
+
+Para contribuir com o projeto:
+
+1. **Faça fork** do repositório
+2. **Clone** seu fork localmente
+3. **Crie uma branch** para sua feature: `git checkout -b feature/sua-feature`
+4. **Faça as mudanças** e adicione testes
+5. **Rode testes localmente**: `npm test && npm run lint`
+6. **Commit** com mensagens descritivas
+7. **Push** para sua branch
+8. **Abra um Pull Request**
+
+### Pré-requisitos para PR
+
+- ✅ Testes passando: `npm test` (157/157)
+- ✅ Linting ok: `npm run lint`
+- ✅ Cobertura mantida: `npm run test:coverage`
+- ✅ Nova funcionalidade tem testes
+- ✅ Documentação atualizada
+
+📖 [Guia Completo de Contribuição](./CONTRIBUTING.md)
 
 ## Licença
 

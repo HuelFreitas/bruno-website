@@ -1,34 +1,26 @@
 import { jsPDF } from 'jspdf';
 import { escapeHtml, safeTrim } from '../src/utils/string.js';
-import { formatDate, uid, combineDateTime, getDateInputValue, formatFileSize } from '../src/utils/misc.js';
-import { clone, announce } from '../src/utils/dom.js';
-import { getTimeInputValue, parseTags, translateStatus, resolveUser } from '../src/utils/helpers.js';
+import { formatDate, uid, combineDateTime, formatFileSize } from '../src/utils/misc.js';
+import { announce } from '../src/utils/dom.js';
+import { parseTags, resolveUser } from '../src/utils/helpers.js';
 import { loadState as loadStateFromStorage, saveState as saveStateToStorage, loadSession as loadSessionFromStorage, saveSession as saveSessionToStorage } from '../src/utils/storage.js';
-import { buildRequestTable } from '../src/components/requests.js';
-import { timelineItem, createTimelineEntry, updateRequestDetailsInModal } from '../src/components/timeline.js';
+import { timelineItem, createTimelineEntry } from '../src/components/timeline.js';
+import { buildStatusChip } from '../src/components/ui.js';
 import { emptyState, buildOperatorBoard, renderClientDashboard, renderOperatorDashboard } from '../src/components/dashboards.js';
-import { createCalendar, initializeCalendar as initCalendar } from '../src/components/calendar.js';
-import { attachRequestModalHandlers as attachModalHandlers, showRequestModal as showModal } from '../src/components/modal.js';
-import { metricCard, buildStatusFilterTab, createSearchInterface, buildStatusChip } from '../src/components/ui.js';
-import { initializeSearch as initSearchModule, performSearch as performSearchModule, displaySearchResults as displaySearchResultsModule } from '../src/components/search.js';
 import { handleStatusUpdate } from '../src/handlers/status.js';
 import { handleProgressUpdate } from '../src/handlers/progress.js';
 import { handleReportSubmission } from '../src/handlers/report.js';
-import { handleClientNote, setupClientManagement, handleRequestEdit, handleRequestDelete } from '../src/handlers/client.js';
+import { handleClientNote, setupClientManagement, handleRequestDelete } from '../src/handlers/client.js';
 import { operatorActions, clientActions } from '../src/handlers/actions.js';
 import { createUploadArea, initializeUploadArea, handleFileUpload, renderEvidenceGallery, removeEvidence, viewEvidence } from '../src/components/upload.js';
-import { showNotification, hideNotification, showSuccessNotification, showErrorNotification, showWarningNotification, showInfoNotification } from '../src/ui/notifications.js';
+import { showSuccessNotification, showErrorNotification, showWarningNotification, showInfoNotification } from '../src/ui/notifications.js';
 import { loadTheme as loadThemeFromStorage, applyTheme as applyThemeToDOM, toggleTheme as toggleThemeInDOM } from '../src/ui/theme.js';
-import { buildMetrics, buildOperatorMetrics } from '../src/handlers/metrics.js';
 
 const STORAGE_KEY = "guardcan:data:v1";
 const SESSION_KEY = "guardcan:session";
 const THEME_KEY = "guardcan:theme";
 
 // `clone` moved to `src/utils/dom.js`
-
-// Wrapper para resolveUser que injeta state.users
-const resolveUserWrapper = (id) => resolveUser(id, state.users);
 
 const companyAvailability = [
   { value: "08:00", label: "08:00 - 10:00", description: "Inspeções matinais com dupla K9" },
@@ -140,20 +132,24 @@ const userName = document.querySelector("#userName");
 const userRole = document.querySelector("#userRole");
 const userAvatar = document.querySelector("#userAvatar");
 
-const state = loadState();
-let session = loadSession();
+const state = loadStateFromStorage() || defaultState;
+let session = loadSessionFromStorage() || {};
+
+// Wrapper para resolveUser que injeta state.users
+const resolveUserWrapper = (id) => resolveUser(id, state.users);
+
 const uiState = {
   filterStatus: "all",
 };
 
-const theme = loadTheme();
-applyTheme(theme);
+const theme = loadThemeFromStorage();
+applyThemeToDOM(theme);
 
 if (yearLabel) {
   yearLabel.textContent = String(new Date().getFullYear());
 }
 
-themeToggle?.addEventListener("click", toggleTheme);
+themeToggle?.addEventListener("click", toggleThemeInDOM);
 logoutButton?.addEventListener("click", handleLogout);
 
 // Garantir que o botão sair esteja escondido na inicialização
@@ -188,6 +184,11 @@ function renderApp() {
 }
 
 function renderLogin(feedback = null) {
+  if (!app) {
+    console.error('[renderLogin] ERROR: app element not found!');
+    return;
+  }
+  
   app.innerHTML = `
     <section class="section-grid">
       <article class="card">
@@ -314,232 +315,6 @@ function renderLogin(feedback = null) {
   });
 }
 
-function renderClientDashboard(user) {
-  const requests = state.requests.filter((request) => request.clientId === user.id);
-  const metrics = buildMetrics(requests);
-
-  app.innerHTML = `
-    <section class="section-grid" aria-label="Indicadores principais">
-      ${metricCard("Solicitações enviadas", metrics.total, "primary")}
-      ${metricCard("Em andamento", metrics.inProgress, "info")}
-      ${metricCard("Concluídas", metrics.completed, "success")}
-      ${metricCard("Próxima inspeção", metrics.nextInspectionLabel, "neutral")}
-    </section>
-
-    <section class="card" aria-labelledby="create-request-heading">
-      <div class="card__header">
-        <h2 id="create-request-heading">Nova solicitação</h2>
-        <p>Informe os dados da operação desejada. Você poderá anexar documentos na etapa de auditoria.</p>
-      </div>
-      <form id="requestForm" class="grid-two" novalidate>
-        <div>
-          <label for="requestTitle">Título da solicitação</label>
-          <input id="requestTitle" name="title" required placeholder="Ex.: Varredura em navio cargueiro" />
-        </div>
-        <div>
-          <label for="requestPort">Porto / Terminal</label>
-          <input id="requestPort" name="port" required placeholder="Informe o porto ou terminal" />
-        </div>
-        <div>
-          <label for="requestVessel">Embarcação</label>
-          <input id="requestVessel" name="vessel" required placeholder="Nome ou registro da embarcação" />
-        </div>
-        <div>
-          <label for="requestCargo">Tipo de carga</label>
-          <input id="requestCargo" name="cargo" placeholder="Ex.: Contêineres, combustíveis, graneis" />
-        </div>
-        <div>
-          <label for="requestDate">Data prevista</label>
-          <input id="requestDate" name="scheduledFor" type="date" required min="${new Date().toISOString().split('T')[0]}" />
-        </div>
-        <div>
-          <label for="requestTime">Horário disponível</label>
-          <select id="requestTime" name="scheduledTime" required>
-            <option value="">Selecione um horário</option>
-            ${companyAvailability
-              .map((slot) => `<option value="${escapeHtml(slot.value)}">${escapeHtml(slot.label)}</option>`)
-              .join("")}
-          </select>
-        </div>
-        <div>
-          <label for="requestTags">Tags (separadas por vírgula)</label>
-          <input id="requestTags" name="tags" placeholder="auditoria, alto risco" />
-        </div>
-        <div class="full-row">
-          <label for="requestDescription">Contexto e observações</label>
-          <textarea id="requestDescription" name="description" required placeholder="Descreva o objetivo, restrições e equipes de apoio."></textarea>
-        </div>
-        <div class="full-row">
-          <button class="primary-button" type="submit">Enviar solicitação</button>
-        </div>
-      </form>
-    </section>
-
-    <section class="card" aria-labelledby="availability-heading">
-      <div class="card__header">
-        <h2 id="availability-heading">Horários disponíveis da equipe</h2>
-        <p>Escolha um dos turnos abaixo ao agendar uma nova inspeção.</p>
-      </div>
-      <ul class="availability-list">
-        ${companyAvailability
-          .map(
-            (slot) => `
-              <li class="availability-slot">
-                <span>${escapeHtml(slot.label)}</span>
-                <small>${escapeHtml(slot.description)}</small>
-              </li>
-            `
-          )
-          .join("")}
-      </ul>
-    </section>
-
-    ${createSearchInterface()}
-
-    <section class="card" aria-labelledby="calendar-heading">
-      <div class="card__header">
-        <h2 id="calendar-heading">Calendário de Operações</h2>
-        <p>Visualize todas as inspeções agendadas em formato de calendário.</p>
-      </div>
-      <div id="calendarContainer"></div>
-    </section>
-
-    <section class="card" aria-labelledby="requests-heading">
-      <div class="card__header">
-        <div>
-          <h2 id="requests-heading">Solicitações cadastradas</h2>
-          <p>Gerencie inspeções, acompanhe o progresso em tempo real e baixe relatórios.</p>
-        </div>
-        <div class="tab-group" role="tablist">
-                  ${buildStatusFilterTab("all", "Todas", uiState.filterStatus)}
-                  ${buildStatusFilterTab("pending", "Pendentes", uiState.filterStatus)}
-                  ${buildStatusFilterTab("in-progress", "Em andamento", uiState.filterStatus)}
-                  ${buildStatusFilterTab("completed", "Concluídas", uiState.filterStatus)}
-        </div>
-      </div>
-              ${requests.length ? buildRequestTable(requests, uiState.filterStatus, user, { resolveUser, escapeHtml, formatDate, buildStatusChip, emptyState }) : emptyState("Nenhuma solicitação cadastrada", "Crie sua primeira inspeção para acompanhar aqui.")}
-    </section>
-  `;
-
-  document
-    .querySelector("#requestForm")
-    ?.addEventListener("submit", (event) => handleCreateRequest(event, user));
-
-  app.querySelectorAll("[data-filter]").forEach((button) => {
-    button.addEventListener("click", () => {
-      uiState.filterStatus = button.dataset.filter;
-      renderClientDashboard(user);
-    });
-  });
-
-  const sharedShowModal = (request, user) => showModal(request, user, {
-    resolveUser,
-    escapeHtml,
-    formatDate,
-    timelineItem,
-    operatorActions,
-    clientActions,
-    createUploadArea,
-    initializeUploadArea,
-    handleStatusUpdate,
-    handleProgressUpdate,
-    handleReportSubmission,
-    handleClientNote,
-    setupClientManagement,
-    exportReport,
-    renderApp,
-    announce,
-    buildStatusChip,
-    safeTrim,
-    createTimelineEntry,
-    saveState,
-    showSuccessNotification,
-    showInfoNotification,
-    showErrorNotification,
-    showWarningNotification,
-    combineDateTime,
-    parseTags,
-    updateRequestDetailsInModal,
-    confirm: (msg) => confirm(msg),
-    state,
-    uid,
-    findRequestById: (id) => state.requests.find((r) => r.id === id),
-    findUserById: (id) => state.users.find((u) => u.id === id),
-  });
-
-  attachModalHandlers(document, user, {
-    findRequestById: (id) => state.requests.find((r) => r.id === id),
-    findUserById: (id) => state.users.find((u) => u.id === id),
-    resolveUser,
-    escapeHtml,
-    formatDate,
-    timelineItem,
-    operatorActions,
-    clientActions,
-    createUploadArea,
-    initializeUploadArea,
-    handleStatusUpdate,
-    handleProgressUpdate,
-    handleReportSubmission,
-    handleClientNote,
-    setupClientManagement,
-    exportReport,
-    renderApp,
-    announce,
-    buildStatusChip,
-    showRequestModal: sharedShowModal,
-  });
-  
-  // Inicializar calendário (injeção de dependências para melhor testabilidade)
-  initCalendar(requests, user, { showRequestModal: sharedShowModal, requestsSource: state.requests });
-  
-  // Inicializar busca avançada (com delay para garantir que o DOM esteja pronto)
-  setTimeout(() => {
-    const performSearchWrapper = () => {
-      performSearchModule({
-        state,
-        session,
-        showSuccessNotification,
-        displaySearchResults: (reqs, usr, hlp) => {
-          displaySearchResultsModule(reqs, usr, {
-            resolveUser,
-            buildStatusChip,
-            showRequestModal: sharedShowModal,
-            state,
-            ...hlp,
-          });
-        },
-      });
-    };
-    initSearchModule({
-      showInfoNotification,
-      performSearch: performSearchWrapper,
-    });
-  }, 100);
-}
-
-function renderOperatorDashboard(user) {
-  const requests = [...state.requests].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
-  const metrics = buildOperatorMetrics(requests, user.id);
-
-  app.innerHTML = `
-    <section class="section-grid" aria-label="Indicadores principais">
-      ${metricCard("Missões atribuídas", metrics.assignedToOperator, "primary")}
-      ${metricCard("Pendentes", metrics.pending, "warning")}
-      ${metricCard("Concluídas", metrics.completed, "success")}
-      ${metricCard("Próxima agenda", metrics.nextInspectionLabel, "neutral")}
-    </section>
-    <section class="card" aria-labelledby="board-heading">
-      <div class="card__header">
-        <h2 id="board-heading">Painel de operações</h2>
-        <p>Atualize checkpoints, registre evidências e finalize relatórios diretamente pelo dispositivo móvel.</p>
-      </div>
-      ${requests.length ? buildOperatorBoard(requests, user) : emptyState("Nenhuma operação disponível", "Aguarde novas solicitações dos clientes.")}
-    </section>
-  `;
-
-  attachRequestModalHandlers(user);
-}
 
 function handleCreateRequest(event, user) {
   event.preventDefault();
@@ -759,48 +534,8 @@ function showRequestModal(request, viewer) {
 // Metrics handlers moved to `src/handlers/metrics.js` (imported above)
 
 // `buildRequestTable` moved to `src/components/requests.js` (imported above)
-
-function buildOperatorBoard(requests, viewer) {
-  return `
-    <div class="section-grid">
-      ${requests
-        .map((request) => {
-          const client = resolveUserWrapper(request.clientId);
-          const safeTitle = escapeHtml(request.title);
-          const safeBadgeId = escapeHtml(request.id.toUpperCase());
-          const safePort = escapeHtml(request.port);
-          const safeVessel = escapeHtml(request.vessel);
-          const safeClientName = escapeHtml(client.name);
-          const safeRequestId = escapeHtml(request.id);
-
-          return `
-            <article class="card" aria-label="${safeTitle}">
-              <header>
-                <p class="badge">${safeBadgeId}</p>
-                <h3>${safeTitle}</h3>
-                <p>${safePort} • ${safeVessel}</p>
-              </header>
-              <p><strong>Cliente:</strong> ${safeClientName}</p>
-              <p><strong>Agenda:</strong> ${formatDate(request.scheduledFor)}</p>
-              <p><strong>Status:</strong> ${translateStatus(request.status)}</p>
-              <button class="primary-button" type="button" data-request="${safeRequestId}">${request.status === "completed" ? "Visualizar relatório" : "Atualizar missão"}</button>
-            </article>
-          `;
-        })
-        .join("")}
-    </div>
-  `;
-}
-
-function emptyState(title, subtitle) {
-  return `
-    <div class="empty-state">
-      <h3>${title}</h3>
-      <p>${subtitle}</p>
-    </div>
-  `;
-}
-
+// `buildOperatorBoard` moved to `src/components/dashboards.js` (imported above)
+// `emptyState` moved to `src/components/dashboards.js` (imported above)
 // `buildStatusChip` moved to `src/components/ui.js` (imported above)
 
 // `buildStatusFilterTab` moved to `src/components/ui.js`
@@ -1031,3 +766,39 @@ function hideUserInfo() {
     userInfo.title = "";
   }
 }
+
+// ========== INICIALIZAÇÃO DA APLICAÇÃO ==========
+
+document.addEventListener('DOMContentLoaded', () => {
+  // Atualizar ano no footer
+  const yearSpan = document.querySelector('#year');
+  if (yearSpan) {
+    yearSpan.textContent = new Date().getFullYear().toString();
+  }
+
+  // Renderizar aplicação com base no estado de sessão
+  if (session.currentUserId) {
+    const currentUser = state.users.find((u) => u.id === session.currentUserId);
+    if (currentUser) {
+      renderApp();
+    } else {
+      renderLogin({ message: "Sessão inválida. Faça login novamente.", type: "error" });
+    }
+  } else {
+    renderLogin();
+  }
+
+  // Configurar evento de toggle de tema
+  const themeToggle = document.querySelector('#themeToggle');
+  if (themeToggle) {
+    themeToggle.addEventListener('click', () => {
+      toggleThemeInDOM();
+    });
+  }
+
+  // Configurar evento de logout
+  const logoutButton = document.querySelector('#logoutButton');
+  if (logoutButton) {
+    logoutButton.addEventListener('click', handleLogout);
+  }
+});
