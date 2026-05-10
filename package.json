@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "start": "vite preview --port 5173",
-    "lint": "eslint . --ext .js, .html",
+    "lint": "eslint . --ext .js",
     "format": "prettier --write .",
     "test": "vitest --config vitest.config.cjs --run",
     "test:watch": "vitest --config vitest.config.cjs",
@@ -23,6 +23,7 @@
   "devDependencies": {
     "@vitest/coverage-v8": "^1.6.1",
     "eslint": "^8.57.1",
+    "eslint-config-prettier": "^10.1.8",
     "jsdom": "^22.1.0",
     "prettier": "^3.6.2",
     "prettier-eslint": "^16.4.2",

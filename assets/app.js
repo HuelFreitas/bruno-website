@@ -136,12 +136,6 @@ function showRequestModal(request, viewer) {
   showRequestModalFn(request, viewer, { state, resolveUser: resolveUserWrapper, saveState, renderApp });
 }
 
-function attachRequestModalHandlers(user) {
-  attachModalHandlersFn(app, user, {
-    findRequestById: (id) => state.requests.find((item) => item.id === id),
-    showRequestModal: (request) => showRequestModal(request, user),
-  });
-}
 
 function handleLogout() {
   session = null;

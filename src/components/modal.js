@@ -16,7 +16,7 @@ import { handleProgressUpdate } from '../handlers/progress.js';
 import { handleReportSubmission } from '../handlers/report.js';
 import { handleClientNote, setupClientManagement } from '../handlers/client.js';
 import { exportReport } from '../handlers/export.js';
-import { showSuccessNotification, showErrorNotification } from '../ui/notifications.js';
+import { showSuccessNotification, showErrorNotification, showWarningNotification } from '../ui/notifications.js';
 
 export function attachRequestModalHandlers(container, user, helpers) {
   const root = container || document;

@@ -1,6 +1,6 @@
 import { escapeHtml as defaultEscape } from '../utils/string.js';
 
-function createCalendar(requests = [], user = {}, { escapeHtml = defaultEscape, baseDate = new Date() } = {}) {
+function createCalendar(requests = [], _user = {}, { escapeHtml = defaultEscape, baseDate = new Date() } = {}) {
   const today = new Date();
   const year = baseDate.getFullYear();
   const month = baseDate.getMonth();
@@ -61,18 +61,18 @@ function createCalendar(requests = [], user = {}, { escapeHtml = defaultEscape, 
           const moreCount = day.requests.length - 2;
 
           return `
-            <div class=\"calendar-day ${isOtherMonth ? 'other-month' : ''} ${isToday ? 'today' : ''}\"
-                 data-date=\"${day.date.toISOString().split('T')[0]}\">
-              <div class=\"calendar-day-number\">${dayNumber}</div>
-              <div class=\"calendar-events\">
+            <div class="calendar-day ${isOtherMonth ? 'other-month' : ''} ${isToday ? 'today' : ''}"
+                 data-date="${day.date.toISOString().split('T')[0]}">
+              <div class="calendar-day-number">${dayNumber}</div>
+              <div class="calendar-events">
                 ${events.map((request) => `
-                  <div class=\"calendar-event ${request.status}\"
-                       data-request=\"${request.id}\"
-                       title=\"${escapeHtml(request.title)}\">
+                  <div class="calendar-event ${request.status}"
+                       data-request="${request.id}"
+                       title="${escapeHtml(request.title)}">
                     ${escapeHtml(request.title.length > 15 ? request.title.substring(0, 15) + '...' : request.title)}
                   </div>
                 `).join('')}
-                ${hasMore ? `<div class=\"calendar-event-more\">+${moreCount} mais</div>` : ''}
+                ${hasMore ? `<div class="calendar-event-more">+${moreCount} mais</div>` : ''}
               </div>
             </div>
           `;

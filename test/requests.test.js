@@ -10,9 +10,9 @@ describe('requests component', () => {
     const helpers = {
       resolveUser: (id) => ({ id, name: 'Operator' }),
       escapeHtml: (v) => String(v),
-      formatDate: (v) => '18 nov 2025',
+      formatDate: () => '18 nov 2025',
       buildStatusChip: (s) => `<span>${s}</span>`,
-      emptyState: (t, s) => `<div>${t}</div>`
+      emptyState: (t) => `<div>${t}</div>`
     };
 
     const out = buildRequestTable(requests, 'all', null, helpers);
