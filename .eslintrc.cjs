@@ -8,5 +8,8 @@ module.exports = {
     ecmaVersion: 2021,
     sourceType: 'module'
   },
-  rules: {}
+  ignorePatterns: ['coverage/', 'dist/', 'node_modules/'],
+  rules: {
+    'no-unused-vars': ['error', { argsIgnorePattern: '^_' }]
+  }
 };

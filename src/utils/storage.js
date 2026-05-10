@@ -3,9 +3,7 @@
  */
 
 import { clone } from './dom.js';
-
-const STORAGE_KEY = "guardcan:data:v1";
-const SESSION_KEY = "guardcan:session";
+import { STORAGE_KEYS } from '../data/constants.js';
 
 /**
  * Carrega o estado da aplicação do localStorage ou retorna estado padrão
@@ -17,7 +15,7 @@ export function loadState(defaultState) {
     return clone(defaultState);
   }
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const stored = localStorage.getItem(STORAGE_KEYS.DATA);
     if (!stored) return clone(defaultState);
     const parsed = JSON.parse(stored);
     return {
@@ -36,7 +34,7 @@ export function loadState(defaultState) {
  */
 export function saveState(state) {
   if (typeof localStorage === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  localStorage.setItem(STORAGE_KEYS.DATA, JSON.stringify(state));
 }
 
 /**
@@ -46,7 +44,7 @@ export function saveState(state) {
 export function loadSession() {
   if (typeof localStorage === "undefined") return null;
   try {
-    const stored = localStorage.getItem(SESSION_KEY);
+    const stored = localStorage.getItem(STORAGE_KEYS.SESSION);
     return stored ? JSON.parse(stored) : null;
   } catch (error) {
     return null;
@@ -60,8 +58,8 @@ export function loadSession() {
 export function saveSession(session) {
   if (typeof localStorage === "undefined") return;
   if (session) {
-    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(session));
   } else {
-    localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(STORAGE_KEYS.SESSION);
   }
 }

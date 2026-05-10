@@ -258,7 +258,7 @@ export function renderClientDashboard({
   initCalendar(requests, user, modalHelpers);
   
   // Initialize search
-  setTimeout(() => {
+  requestAnimationFrame(() => {
     const performSearchWrapper = () => {
       performSearchModule({
         state,
@@ -271,7 +271,7 @@ export function renderClientDashboard({
       showInfoNotification: modalHelpers.showInfoNotification || (() => {}),
       performSearch: performSearchWrapper,
     });
-  }, 100);
+  });
 }
 
 /**

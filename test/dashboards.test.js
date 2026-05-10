@@ -57,24 +57,12 @@ describe('dashboard components', () => {
 
   describe('renderClientDashboard', () => {
     it('should be callable without throwing with valid options', () => {
-      const options = {
-        user: { id: 'cl1', name: 'Client' },
-        state: { requests: [] },
-        uiState: {},
-      };
-      // We're just checking it's a function that can be called
       expect(typeof renderClientDashboard).toBe('function');
     });
   });
 
   describe('renderOperatorDashboard', () => {
     it('should be callable without throwing with valid options', () => {
-      const options = {
-        user: { id: 'op1', name: 'Operator' },
-        state: { requests: [] },
-        uiState: {},
-      };
-      // We're just checking it's a function that can be called
       expect(typeof renderOperatorDashboard).toBe('function');
     });
   });

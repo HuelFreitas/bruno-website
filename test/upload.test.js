@@ -5,7 +5,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   createUploadArea,
-  initializeUploadArea,
   handleFileUpload,
   renderEvidenceGallery,
   removeEvidence,
@@ -19,7 +18,7 @@ describe('upload component', () => {
     // minimal helpers mock
     helpers = {
       findRequestById: (id) => ({ id, evidence: [] }),
-      findRequestByEvidenceId: (evidenceId) => null,
+      findRequestByEvidenceId: () => null,
       findUserById: (id) => ({ id, name: 'User' }),
       showErrorNotification: vi.fn(),
       showSuccessNotification: vi.fn(),

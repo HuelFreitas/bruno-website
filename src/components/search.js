@@ -13,7 +13,7 @@ export function initializeSearch(helpers) {
 
   const searchForm = document.getElementById('searchForm');
   const toggleButton = document.getElementById('toggleSearch');
-  const toggleText = document.getElementById('searchToggleText');
+
   const clearButton = document.getElementById('clearSearch');
   const clearResultsButton = document.getElementById('clearSearchResults');
   const searchResults = document.getElementById('searchResults');
@@ -146,7 +146,7 @@ export function performSearch(helpers) {
  * @param {Object} helpers.state - Estado da aplicação
  */
 export function displaySearchResults(requests, user, helpers) {
-  const { resolveUser, buildStatusChip, showRequestModal, state } = helpers;
+  const { buildStatusChip, showRequestModal, state } = helpers;
 
   const searchResults = document.getElementById('searchResults');
   const searchResultsCount = document.getElementById('searchResultsCount');

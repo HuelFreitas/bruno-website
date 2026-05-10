@@ -1,15 +1,9 @@
 import { escapeHtml as defaultEscape } from '../utils/string.js';
 
-let currentCalendarDate = new Date();
-
-function _resetCalendarDate(d) {
-  currentCalendarDate = d ? new Date(d) : new Date();
-}
-
-function createCalendar(requests = [], user = {}, { escapeHtml = defaultEscape } = {}) {
+function createCalendar(requests = [], _user = {}, { escapeHtml = defaultEscape, baseDate = new Date() } = {}) {
   const today = new Date();
-  const year = currentCalendarDate.getFullYear();
-  const month = currentCalendarDate.getMonth();
+  const year = baseDate.getFullYear();
+  const month = baseDate.getMonth();
 
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
@@ -67,18 +61,18 @@ function createCalendar(requests = [], user = {}, { escapeHtml = defaultEscape }
           const moreCount = day.requests.length - 2;
 
           return `
-            <div class=\"calendar-day ${isOtherMonth ? 'other-month' : ''} ${isToday ? 'today' : ''}\" 
-                 data-date=\"${day.date.toISOString().split('T')[0]}\">
-              <div class=\"calendar-day-number\">${dayNumber}</div>
-              <div class=\"calendar-events\">
+            <div class="calendar-day ${isOtherMonth ? 'other-month' : ''} ${isToday ? 'today' : ''}"
+                 data-date="${day.date.toISOString().split('T')[0]}">
+              <div class="calendar-day-number">${dayNumber}</div>
+              <div class="calendar-events">
                 ${events.map((request) => `
-                  <div class=\"calendar-event ${request.status}\" 
-                       data-request=\"${request.id}\" 
-                       title=\"${escapeHtml(request.title)}\">
+                  <div class="calendar-event ${request.status}"
+                       data-request="${request.id}"
+                       title="${escapeHtml(request.title)}">
                     ${escapeHtml(request.title.length > 15 ? request.title.substring(0, 15) + '...' : request.title)}
                   </div>
                 `).join('')}
-                ${hasMore ? `<div class=\"calendar-event-more\">+${moreCount} mais</div>` : ''}
+                ${hasMore ? `<div class="calendar-event-more">+${moreCount} mais</div>` : ''}
               </div>
             </div>
           `;
@@ -88,26 +82,26 @@ function createCalendar(requests = [], user = {}, { escapeHtml = defaultEscape }
   `;
 }
 
-function initializeCalendar(requests = [], user = {}, { document = window.document, showRequestModal = null, requestsSource = null } = {}) {
+function initializeCalendar(requests = [], user = {}, { document = window.document, showRequestModal = null, requestsSource = null, baseDate = new Date() } = {}) {
   const calendarContainer = document.getElementById ? document.getElementById('calendarContainer') : null;
   if (!calendarContainer) return;
 
   const renderRequests = requestsSource || requests;
-  calendarContainer.innerHTML = createCalendar(renderRequests, user, { escapeHtml: defaultEscape });
+  calendarContainer.innerHTML = createCalendar(renderRequests, user, { escapeHtml: defaultEscape, baseDate });
 
   const prev = document.getElementById('prevMonth');
   const next = document.getElementById('nextMonth');
 
   prev?.addEventListener('click', () => {
-    currentCalendarDate.setMonth(currentCalendarDate.getMonth() - 1);
-    calendarContainer.innerHTML = createCalendar(renderRequests, user, { escapeHtml: defaultEscape });
-    initializeCalendar(renderRequests, user, { document, showRequestModal, requestsSource });
+    const prevDate = new Date(baseDate);
+    prevDate.setMonth(prevDate.getMonth() - 1);
+    initializeCalendar(renderRequests, user, { document, showRequestModal, requestsSource, baseDate: prevDate });
   });
 
   next?.addEventListener('click', () => {
-    currentCalendarDate.setMonth(currentCalendarDate.getMonth() + 1);
-    calendarContainer.innerHTML = createCalendar(renderRequests, user, { escapeHtml: defaultEscape });
-    initializeCalendar(renderRequests, user, { document, showRequestModal, requestsSource });
+    const nextDate = new Date(baseDate);
+    nextDate.setMonth(nextDate.getMonth() + 1);
+    initializeCalendar(renderRequests, user, { document, showRequestModal, requestsSource, baseDate: nextDate });
   });
 
   calendarContainer.querySelectorAll('.calendar-event').forEach((eventElement) => {
@@ -124,4 +118,4 @@ function initializeCalendar(requests = [], user = {}, { document = window.docume
   });
 }
 
-export { createCalendar, initializeCalendar, _resetCalendarDate };
+export { createCalendar, initializeCalendar };

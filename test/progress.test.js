@@ -9,17 +9,12 @@ describe('progress handler', () => {
   let helpers;
   beforeEach(() => {
     helpers = {
-      safeTrim: (s) => (s ? String(s).trim() : ''),
-      createTimelineEntry: (data) => ({ ...data, id: 'evt-2', timestamp: new Date().toISOString() }),
       saveState: vi.fn(),
-      timelineItem: (e) => `<item>${e.title}</item>`,
-      announce: vi.fn(),
-      showInfoNotification: vi.fn(),
       renderApp: vi.fn(),
     };
   });
 
-  it('adds checkpoint entry and notifies', () => {
+  it('adds checkpoint entry to timeline and saves state', () => {
     const request = { id: 'r-2', timeline: [] };
     const operator = { id: 'op-2', name: 'Op2' };
     const dialog = document.createElement('div');
@@ -31,7 +26,8 @@ describe('progress handler', () => {
     handleProgressUpdate(event, request, operator, dialog, helpers);
 
     expect(request.timeline.length).toBe(1);
+    expect(request.assignedOperatorId).toBe('op-2');
     expect(helpers.saveState).toHaveBeenCalled();
-    expect(helpers.showInfoNotification).toHaveBeenCalled();
+    expect(helpers.renderApp).toHaveBeenCalled();
   });
 });

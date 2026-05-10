@@ -9,15 +9,11 @@ describe('report handler', () => {
   let helpers;
   beforeEach(() => {
     helpers = {
-      safeTrim: (s) => (s ? String(s).trim() : ''),
-      createTimelineEntry: (data) => ({ ...data, id: 'evt-3', timestamp: new Date().toISOString() }),
       saveState: vi.fn(),
-      announce: vi.fn(),
-      showSuccessNotification: vi.fn(),
     };
   });
 
-  it('submits report, closes dialog and marks as completed', () => {
+  it('submits report, closes dialog and marks request as completed', () => {
     const request = { id: 'r-3', timeline: [], status: 'in-progress', report: null };
     const operator = { id: 'op-3', name: 'Op3' };
     const dialog = { close: vi.fn() };
@@ -29,9 +25,10 @@ describe('report handler', () => {
     handleReportSubmission(event, request, operator, dialog, helpers);
 
     expect(request.report).toBeTruthy();
+    expect(request.report.summary).toBe('sum');
     expect(request.status).toBe('completed');
+    expect(request.timeline.length).toBe(1);
     expect(helpers.saveState).toHaveBeenCalled();
     expect(dialog.close).toHaveBeenCalled();
-    expect(helpers.showSuccessNotification).toHaveBeenCalled();
   });
 });

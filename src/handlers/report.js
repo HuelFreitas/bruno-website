@@ -1,13 +1,18 @@
+import { safeTrim } from '../utils/string.js';
+import { announce } from '../utils/dom.js';
+import { createTimelineEntry } from '../components/timeline.js';
+import { showSuccessNotification } from '../ui/notifications.js';
+
 export function handleReportSubmission(event, request, operator, dialog, helpers) {
   event.preventDefault();
   const form = event.currentTarget;
   const data = new FormData(form);
-  const summary = helpers.safeTrim(data.get('summary'));
-  const findings = helpers.safeTrim(data.get('findings'));
-  const recommendations = helpers.safeTrim(data.get('recommendations'));
+  const summary = safeTrim(data.get('summary'));
+  const findings = safeTrim(data.get('findings'));
+  const recommendations = safeTrim(data.get('recommendations'));
 
   if (!summary || !findings || !recommendations) {
-    helpers.announce('Preencha todos os campos do relatório.');
+    announce('Preencha todos os campos do relatório.');
     return;
   }
 
@@ -22,7 +27,7 @@ export function handleReportSubmission(event, request, operator, dialog, helpers
   request.updatedAt = new Date().toISOString();
   request.assignedOperatorId = operator.id;
   request.timeline.push(
-    helpers.createTimelineEntry({
+    createTimelineEntry({
       actor: operator,
       title: 'Relatório final registrado',
       description: 'Missão concluída e relatório disponibilizado ao cliente.',
@@ -32,8 +37,8 @@ export function handleReportSubmission(event, request, operator, dialog, helpers
 
   helpers.saveState();
   dialog.close();
-  helpers.announce('Relatório final salvo e missão concluída.');
-  helpers.showSuccessNotification(
+  announce('Relatório final salvo e missão concluída.');
+  showSuccessNotification(
     'Missão concluída!',
     `Relatório final da solicitação ${request.id.toUpperCase()} foi enviado com sucesso`,
     6000
