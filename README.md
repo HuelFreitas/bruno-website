@@ -64,12 +64,10 @@ npm run coverage
 
 ### Métricas Atuais
 
-- **157 testes** implementados e passando (100%) ✅
-- **Cobertura dos módulos `src/`:** 37.14% statements (varia de 0% a 100% por módulo)
-- **Funções cobertas:** 76.56% | **Branches:** 68.34%
+- **132 testes** implementados e passando (100%) ✅
 - **Thresholds configurados:** 80% statements/functions, 75% branches (aplicados apenas a `src/**/*.js`)
 
-> A cobertura mede somente os módulos extraídos para `src/`. O arquivo principal `assets/app.js` ainda está em migração gradual para essa estrutura.
+> A cobertura mede somente os módulos em `src/`. Execute `npm run test:coverage` para gerar o relatório atualizado.
 
 📊 [Relatório de Cobertura Detalhado](./coverage/index.html)
 
@@ -79,10 +77,9 @@ npm run coverage
 test/
 ├── helpers.test.js       (36 testes) ✅
 ├── storage.test.js       (26 testes) ✅
-├── theme.test.js         (25 testes) ✅
 ├── notifications.test.js (22 testes) ✅
-├── dashboards.test.js    (6 testes)  ✅
 ├── search.test.js        (9 testes)  ✅
+├── dashboards.test.js    (6 testes)  ✅
 ├── actions.test.js       (4 testes)  ✅
 └── ...outros             (~29 testes)✅
 ```
@@ -142,7 +139,7 @@ Configurado para rodar **automaticamente em cada Pull Request**:
 - Atualização de status (pendente, em andamento, concluída) com rastreabilidade.
 - Registro de checkpoints operacionais com descrição e próximos passos.
 - Formulário de relatório final com resumo, achados e recomendações.
-- Geração automática de relatório imprimível (HTML) para auditoria.
+- Exportação de relatório em PDF (via jsPDF) para auditoria.
 
 ## Recursos adicionais
 
@@ -154,25 +151,31 @@ Configurado para rodar **automaticamente em cada Pull Request**:
 
 ```
 ├── assets/
-│   ├── app.js              # App principal (monolito em migração gradual para src/)
-│   └── styles.css          # Design system com suporte a tema dinâmico
+│   ├── app.js              # Orquestrador principal (~180 linhas); lógica de negócio em src/
+│   └── styles.css          # Design system
 ├── src/
 │   ├── main.js             # Entry point do Vite (importa assets/app.js)
 │   ├── components/
 │   │   ├── calendar.js     # Seletor de data/hora
 │   │   ├── dashboards.js   # Painéis do cliente e do operador
+│   │   ├── header.js       # Informações de usuário no cabeçalho
+│   │   ├── login.js        # Formulário de autenticação
 │   │   ├── modal.js        # Componente de modal genérico
 │   │   ├── requests.js     # Listagem e filtros de solicitações
 │   │   ├── search.js       # Busca de operações
 │   │   ├── timeline.js     # Linha do tempo de eventos
 │   │   ├── ui.js           # Chips de status e elementos visuais
 │   │   └── upload.js       # Upload e galeria de evidências
+│   ├── data/
+│   │   └── constants.js    # Constantes globais (chaves de storage, limites)
 │   ├── handlers/
 │   │   ├── actions.js      # Ações de cliente e operador
 │   │   ├── client.js       # Notas e gestão do cliente
+│   │   ├── export.js       # Exportação de relatório em PDF
 │   │   ├── metrics.js      # Cálculo de métricas do dashboard
 │   │   ├── progress.js     # Atualização de progresso/checkpoints
 │   │   ├── report.js       # Submissão de relatório final
+│   │   ├── requests.js     # Criação de nova solicitação
 │   │   └── status.js       # Atualização de status da operação
 │   ├── ui/
 │   │   └── notifications.js # Notificações de sucesso/erro/aviso
@@ -181,8 +184,9 @@ Configurado para rodar **automaticamente em cada Pull Request**:
 │       ├── helpers.js       # Utilitários de negócio (tags, usuários)
 │       ├── misc.js          # Formatação de datas, UIDs, tamanhos
 │       ├── storage.js       # Leitura/escrita no localStorage
-│       └── string.js        # Sanitização e trim seguro
-├── test/                   # 157 testes unitários (Vitest + jsdom)
+│       ├── string.js        # Sanitização e trim seguro
+│       └── validators.js    # Validações de data e formulário
+├── test/                   # 132 testes unitários (Vitest + jsdom)
 ├── index.html              # Shell da aplicação
 └── vite.config.js          # Configuração do bundler
 ```
@@ -190,7 +194,7 @@ Configurado para rodar **automaticamente em cada Pull Request**:
 ## Próximos passos sugeridos
 
 - Integrar API real para autenticação e persistência dos dados.
-- Adicionar upload de evidências (fotos, laudos) e assinatura digital.
+- Adicionar assinatura digital aos relatórios exportados.
 - Implementar fluxo de notificações por e-mail ou push.
 - Melhorar cobertura de testes para 80%+ nos módulos com baixa cobertura.
 
@@ -209,7 +213,7 @@ Para contribuir com o projeto:
 
 ### Pré-requisitos para PR
 
-- ✅ Testes passando: `npm test` (157/157)
+- ✅ Testes passando: `npm test` (132/132)
 - ✅ Linting ok: `npm run lint`
 - ✅ Cobertura mantida: `npm run test:coverage`
 - ✅ Nova funcionalidade tem testes

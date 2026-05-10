@@ -1,4 +1,5 @@
 import { formatFileSize } from '../utils/misc.js';
+import { MAX_EVIDENCE_COUNT } from '../data/constants.js';
 
 export function createUploadArea(requestId) {
   return `
@@ -66,7 +67,20 @@ export function handleFileUpload(files, requestId, helpers) {
   if (!request) return;
   if (!request.evidence) request.evidence = [];
 
+  let limitWarningShown = false;
   Array.from(files).forEach((file) => {
+    if (request.evidence.length >= MAX_EVIDENCE_COUNT) {
+      if (!limitWarningShown) {
+        limitWarningShown = true;
+        helpers.showWarningNotification(
+          'Limite de evidências atingido',
+          `Cada solicitação suporta no máximo ${MAX_EVIDENCE_COUNT} evidências.`,
+          5000
+        );
+      }
+      return;
+    }
+
     if (file.size > 10 * 1024 * 1024) {
       helpers.showErrorNotification('Arquivo muito grande', `O arquivo "${file.name}" excede o limite de 10MB`, 5000);
       return;

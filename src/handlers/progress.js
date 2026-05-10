@@ -1,14 +1,19 @@
+import { safeTrim } from '../utils/string.js';
+import { announce } from '../utils/dom.js';
+import { createTimelineEntry, timelineItem } from '../components/timeline.js';
+import { showInfoNotification } from '../ui/notifications.js';
+
 export function handleProgressUpdate(event, request, operator, dialog, helpers) {
   event.preventDefault();
   const form = event.currentTarget;
   const data = new FormData(form);
-  const title = helpers.safeTrim(data.get('title'));
-  const details = helpers.safeTrim(data.get('details'));
-  const next = helpers.safeTrim(data.get('next'));
+  const title = safeTrim(data.get('title'));
+  const details = safeTrim(data.get('details'));
+  const next = safeTrim(data.get('next'));
 
   if (!title || !details) return;
 
-  const entry = helpers.createTimelineEntry({
+  const entry = createTimelineEntry({
     actor: operator,
     title,
     description: `${details}${next ? ` Próximos passos: ${next}.` : ''}`,
@@ -21,9 +26,9 @@ export function handleProgressUpdate(event, request, operator, dialog, helpers) 
   helpers.saveState();
   form.reset();
   const timeline = dialog.querySelector('.timeline');
-  if (timeline) timeline.insertAdjacentHTML('afterbegin', helpers.timelineItem(entry));
-  helpers.announce('Checkpoint registrado.');
-  helpers.showInfoNotification(
+  if (timeline) timeline.insertAdjacentHTML('afterbegin', timelineItem(entry));
+  announce('Checkpoint registrado.');
+  showInfoNotification(
     'Checkpoint registrado!',
     `Nova atualização adicionada à solicitação ${request.id.toUpperCase()}`,
     4000

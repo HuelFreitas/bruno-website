@@ -4,10 +4,11 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { loadState, saveState, loadSession, saveSession } from '../src/utils/storage.js';
+import { STORAGE_KEYS } from '../src/data/constants.js';
 
 describe('storage utils', () => {
-  const STORAGE_KEY = "guardcan:data:v1";
-  const SESSION_KEY = "guardcan:session";
+  const STORAGE_KEY = STORAGE_KEYS.DATA;
+  const SESSION_KEY = STORAGE_KEYS.SESSION;
 
   beforeEach(() => {
     // Create a simple mock localStorage for testing

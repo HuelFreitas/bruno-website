@@ -1,11 +1,19 @@
+import { isPastDate } from '../utils/validators.js';
+import { safeTrim } from '../utils/string.js';
+import { combineDateTime, formatDate } from '../utils/misc.js';
+import { parseTags } from '../utils/helpers.js';
+import { announce } from '../utils/dom.js';
+import { createTimelineEntry, timelineItem, updateRequestDetailsInModal } from '../components/timeline.js';
+import { showErrorNotification, showWarningNotification } from '../ui/notifications.js';
+
 export function handleClientNote(event, request, client, dialog, helpers) {
   event.preventDefault();
   const form = event.currentTarget;
   const data = new FormData(form);
-  const note = helpers.safeTrim(data.get('note'));
+  const note = safeTrim(data.get('note'));
   if (!note) return;
 
-  const entry = helpers.createTimelineEntry({
+  const entry = createTimelineEntry({
     actor: client,
     title: 'Cliente adicionou observação',
     description: note,
@@ -16,8 +24,8 @@ export function handleClientNote(event, request, client, dialog, helpers) {
   helpers.saveState();
   form.reset();
   const timeline = dialog.querySelector('.timeline');
-  if (timeline) timeline.insertAdjacentHTML('afterbegin', helpers.timelineItem(entry));
-  helpers.announce('Mensagem adicionada ao histórico.');
+  if (timeline) timeline.insertAdjacentHTML('afterbegin', timelineItem(entry));
+  announce('Mensagem adicionada ao histórico.');
   helpers.renderApp();
 }
 
@@ -40,11 +48,11 @@ export function setupClientManagement(dialog, request, client, helpers) {
   }
 
   editForm?.addEventListener('submit', (event) =>
-    helpers.handleRequestEdit(event, request, client, dialog, editToggle, editFormContainer, helpers)
+    handleRequestEdit(event, request, client, dialog, editToggle, editFormContainer, helpers)
   );
 
   dialog.querySelector('[data-delete-request]')?.addEventListener('click', () =>
-    helpers.handleRequestDelete(request, dialog, helpers)
+    handleRequestDelete(request, dialog, helpers)
   );
 }
 
@@ -53,23 +61,19 @@ export function handleRequestEdit(event, request, client, dialog, toggleButton, 
   const form = event.currentTarget;
   const data = new FormData(form);
 
-  const title = helpers.safeTrim(data.get('title'));
-  const port = helpers.safeTrim(data.get('port'));
-  const vessel = helpers.safeTrim(data.get('vessel'));
-  const cargo = helpers.safeTrim(data.get('cargo')) || 'Não informado';
-  const description = helpers.safeTrim(data.get('description'));
+  const title = safeTrim(data.get('title'));
+  const port = safeTrim(data.get('port'));
+  const vessel = safeTrim(data.get('vessel'));
+  const cargo = safeTrim(data.get('cargo')) || 'Não informado';
+  const description = safeTrim(data.get('description'));
   const scheduledDateValue = typeof data.get('scheduledFor') === 'string' ? data.get('scheduledFor') : '';
   const scheduledTimeValue = typeof data.get('scheduledTime') === 'string' ? data.get('scheduledTime') : '';
-  const scheduledFor = helpers.combineDateTime(scheduledDateValue, scheduledTimeValue);
-  const tags = helpers.parseTags(data.get('tags'));
+  const scheduledFor = combineDateTime(scheduledDateValue, scheduledTimeValue);
+  const tags = parseTags(data.get('tags'));
 
   if (scheduledDateValue && scheduledTimeValue) {
-    const scheduledDateTime = new Date(scheduledFor);
-    const now = new Date();
-    const originalDateTime = new Date(request.scheduledFor);
-
-    if (scheduledDateTime < now) {
-      helpers.showErrorNotification(
+    if (isPastDate(scheduledFor)) {
+      showErrorNotification(
         'Data inválida',
         'Não é possível agendar inspeções no passado. Selecione uma data futura.',
         6000
@@ -77,20 +81,18 @@ export function handleRequestEdit(event, request, client, dialog, toggleButton, 
       return;
     }
 
-    const diffHours = Math.abs(scheduledDateTime - originalDateTime) / (1000 * 60 * 60);
+    const diffHours = Math.abs(new Date(scheduledFor) - new Date(request.scheduledFor)) / (1000 * 60 * 60);
     if (diffHours > 24) {
-      helpers.showWarningNotification(
+      showWarningNotification(
         'Data alterada',
-        `A data da inspeção foi alterada de ${helpers.formatDate(originalDateTime)} para ${helpers.formatDate(
-          scheduledDateTime
-        )}`,
+        `A data da inspeção foi alterada de ${formatDate(new Date(request.scheduledFor))} para ${formatDate(new Date(scheduledFor))}`,
         5000
       );
     }
   }
 
   if (!title || !port || !vessel || !description || !scheduledFor) {
-    helpers.announce('Preencha todos os campos obrigatórios antes de salvar.');
+    announce('Preencha todos os campos obrigatórios antes de salvar.');
     return;
   }
 
@@ -103,7 +105,7 @@ export function handleRequestEdit(event, request, client, dialog, toggleButton, 
   request.tags = tags;
   request.updatedAt = new Date().toISOString();
 
-  const entry = helpers.createTimelineEntry({
+  const entry = createTimelineEntry({
     actor: client,
     title: 'Cliente atualizou a solicitação',
     description: 'Detalhes do serviço revisados pelo solicitante.',
@@ -112,10 +114,10 @@ export function handleRequestEdit(event, request, client, dialog, toggleButton, 
   request.timeline.push(entry);
 
   helpers.saveState();
-  helpers.updateRequestDetailsInModal(dialog, request);
+  updateRequestDetailsInModal(dialog, request);
 
   const timeline = dialog.querySelector('.timeline');
-  if (timeline) timeline.insertAdjacentHTML('afterbegin', helpers.timelineItem(entry));
+  if (timeline) timeline.insertAdjacentHTML('afterbegin', timelineItem(entry));
 
   if (toggleButton && formContainer) {
     formContainer.setAttribute('hidden', '');
@@ -123,7 +125,7 @@ export function handleRequestEdit(event, request, client, dialog, toggleButton, 
   }
 
   form.querySelector('textarea')?.blur();
-  helpers.announce('Solicitação atualizada com sucesso.');
+  announce('Solicitação atualizada com sucesso.');
   helpers.renderApp();
 
   const descriptionField = form.querySelector('#editDescription');
@@ -156,8 +158,8 @@ export function handleRequestDelete(request, dialog, helpers) {
 
   dialog.close();
   helpers.renderApp();
-  helpers.announce('Solicitação removida. A equipe será notificada.');
-  helpers.showWarningNotification(
+  announce('Solicitação removida. A equipe será notificada.');
+  showWarningNotification(
     'Solicitação removida',
     `A solicitação ${request.id.toUpperCase()} foi excluída permanentemente`,
     5000

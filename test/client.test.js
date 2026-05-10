@@ -9,16 +9,12 @@ describe('client handlers', () => {
   let helpers;
   beforeEach(() => {
     helpers = {
-      safeTrim: (s) => (s ? String(s).trim() : ''),
-      createTimelineEntry: (data) => ({ ...data, id: 'evt-4', timestamp: new Date().toISOString() }),
       saveState: vi.fn(),
-      timelineItem: (e) => `<item>${e.title}</item>`,
-      announce: vi.fn(),
       renderApp: vi.fn(),
     };
   });
 
-  it('adds client note to timeline and saves', () => {
+  it('adds client note to timeline and saves state', () => {
     const request = { id: 'r-4', timeline: [] };
     const client = { id: 'c-1', name: 'Client' };
     const dialog = document.createElement('div');
@@ -30,7 +26,8 @@ describe('client handlers', () => {
     handleClientNote(event, request, client, dialog, helpers);
 
     expect(request.timeline.length).toBe(1);
+    expect(request.timeline[0].description).toBe('Hello');
     expect(helpers.saveState).toHaveBeenCalled();
-    expect(helpers.announce).toHaveBeenCalled();
+    expect(helpers.renderApp).toHaveBeenCalled();
   });
 });
