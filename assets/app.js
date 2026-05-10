@@ -1,21 +1,38 @@
+import { jsPDF } from 'jspdf';
+import { escapeHtml, safeTrim } from '../src/utils/string.js';
+import { formatDate, uid, combineDateTime, formatFileSize } from '../src/utils/misc.js';
+import { announce } from '../src/utils/dom.js';
+import { parseTags, resolveUser, translateStatus } from '../src/utils/helpers.js';
+import { loadState as loadStateFromStorage, saveState as saveStateToStorage, loadSession as loadSessionFromStorage, saveSession as saveSessionToStorage } from '../src/utils/storage.js';
+import { timelineItem, createTimelineEntry, updateRequestDetailsInModal } from '../src/components/timeline.js';
+import { metricCard, buildStatusFilterTab, createSearchInterface, buildStatusChip } from '../src/components/ui.js';
+import { buildMetrics, buildOperatorMetrics } from '../src/handlers/metrics.js';
+import { buildRequestTable } from '../src/components/requests.js';
+import { initializeCalendar } from '../src/components/calendar.js';
+import { initializeSearch, performSearch as performSearchFn, displaySearchResults as displaySearchResultsFn } from '../src/components/search.js';
+import { attachRequestModalHandlers as attachModalHandlersFn } from '../src/components/modal.js';
+import { emptyState, buildOperatorBoard, renderClientDashboard, renderOperatorDashboard } from '../src/components/dashboards.js';
+import { handleStatusUpdate } from '../src/handlers/status.js';
+import { handleProgressUpdate } from '../src/handlers/progress.js';
+import { handleReportSubmission } from '../src/handlers/report.js';
+import { handleClientNote, setupClientManagement, handleRequestDelete, handleRequestEdit } from '../src/handlers/client.js';
+import { operatorActions, clientActions } from '../src/handlers/actions.js';
+import { createUploadArea, initializeUploadArea, handleFileUpload, renderEvidenceGallery, removeEvidence, viewEvidence } from '../src/components/upload.js';
+import { showSuccessNotification, showErrorNotification, showWarningNotification, showInfoNotification } from '../src/ui/notifications.js';
+
 const STORAGE_KEY = "guardcan:data:v1";
 const SESSION_KEY = "guardcan:session";
-const THEME_KEY = "guardcan:theme";
 
-const clone = (value) => JSON.parse(JSON.stringify(value));
+// `clone` moved to `src/utils/dom.js`
 
-function escapeHtml(value) {
-  if (value === null || value === undefined) {
-    return "";
-  }
+const companyAvailability = [
+  { value: "08:00", label: "08:00 - 10:00", description: "Inspeções matinais com dupla K9" },
+  { value: "10:00", label: "10:00 - 12:00", description: "Janela ideal para auditorias em docas" },
+  { value: "13:30", label: "13:30 - 15:30", description: "Equipe disponível após pausa operacional" },
+  { value: "16:00", label: "16:00 - 18:00", description: "Turno avançado para operações urgentes" },
+];
 
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
+
 
 const defaultState = {
   users: [
@@ -43,7 +60,7 @@ const defaultState = {
       port: "Porto de Santos",
       vessel: "MSC Aurora",
       cargo: "Contêineres refrigerados",
-      scheduledFor: "2025-10-15",
+      scheduledFor: "2025-10-15T08:00:00",
       description:
         "Solicitação de inspeção preventiva com equipe K9 especializada em cargas sensíveis e perecíveis.",
       status: "in-progress",
@@ -87,7 +104,7 @@ const defaultState = {
       port: "Terminal de Aracruz",
       vessel: "Blue Atlantic",
       cargo: "Graneis sólidos",
-      scheduledFor: "2025-11-03",
+      scheduledFor: "2025-11-03T13:30:00",
       description:
         "Auditoria solicitada após alerta da Receita Federal para cargas de alto risco.",
       status: "pending",
@@ -111,30 +128,43 @@ const defaultState = {
 
 const app = document.querySelector("#app");
 const logoutButton = document.querySelector("#logoutButton");
-const themeToggle = document.querySelector("#themeToggle");
 const yearLabel = document.querySelector("#year");
+const userInfo = document.querySelector("#userInfo");
+const userName = document.querySelector("#userName");
+const userRole = document.querySelector("#userRole");
+const userAvatar = document.querySelector("#userAvatar");
 
-const state = loadState();
-let session = loadSession();
+const state = loadStateFromStorage(defaultState);
+let session = loadSessionFromStorage() || {};
+
+// Wrapper para resolveUser que injeta state.users
+const resolveUserWrapper = (id) => resolveUser(id, state.users);
+
 const uiState = {
   filterStatus: "all",
 };
 
-const theme = loadTheme();
-applyTheme(theme);
+// Wrapper functions — defined here so they are available before the first renderApp() call below
+const loadState = () => loadStateFromStorage(defaultState);
+const saveState = () => saveStateToStorage(state);
+const loadSession = () => loadSessionFromStorage();
+const saveSession = () => saveSessionToStorage(session);
 
 if (yearLabel) {
   yearLabel.textContent = String(new Date().getFullYear());
 }
 
-themeToggle?.addEventListener("click", toggleTheme);
 logoutButton?.addEventListener("click", handleLogout);
+
+// Garantir que o botão sair esteja escondido na inicialização
+logoutButton.hidden = true;
 
 renderApp();
 
 function renderApp() {
   if (!session?.currentUserId) {
     logoutButton.hidden = true;
+    hideUserInfo();
     renderLogin();
     return;
   }
@@ -148,15 +178,82 @@ function renderApp() {
   }
 
   logoutButton.hidden = false;
+  updateUserInfo(currentUser);
 
   if (currentUser.role === "client") {
-    renderClientDashboard(currentUser);
+    renderCurrentClientDashboard(currentUser);
   } else {
-    renderOperatorDashboard(currentUser);
+    renderCurrentOperatorDashboard(currentUser);
   }
 }
 
+function renderCurrentOperatorDashboard(user) {
+  renderOperatorDashboard({
+    user,
+    state,
+    buildOperatorMetrics,
+    metricCard,
+    buildOperatorBoard,
+    emptyState,
+    app,
+    attachRequestModalHandlers,
+  });
+}
+
+function renderCurrentClientDashboard(user) {
+  const modalHelpers = {
+    findRequestById: (id) => state.requests.find((r) => r.id === id),
+    showRequestModal: (request) => showRequestModal(request, user),
+    resolveUser: resolveUserWrapper,
+    escapeHtml,
+    formatDate,
+    buildStatusChip,
+    emptyState,
+    session,
+    showSuccessNotification,
+    showInfoNotification,
+    displaySearchResults: (requests) =>
+      displaySearchResultsFn(requests, user, {
+        escapeHtml,
+        formatDate,
+        buildStatusChip,
+        resolveUser: resolveUserWrapper,
+        emptyState,
+      }),
+  };
+
+  renderClientDashboard({
+    user,
+    state,
+    uiState,
+    buildMetrics,
+    metricCard,
+    buildStatusFilterTab,
+    createSearchInterface,
+    buildRequestTable,
+    handleCreateRequest,
+    initCalendar: (requests, u) =>
+      initializeCalendar(requests, u, {
+        showRequestModal: (request) => showRequestModal(request, u),
+      }),
+    initSearchModule: initializeSearch,
+    performSearchModule: performSearchFn,
+    displaySearchResultsModule: displaySearchResultsFn,
+    app,
+    saveState,
+    renderApp,
+    companyAvailability,
+    attachModalHandlers: (_container, u) => attachRequestModalHandlers(u),
+    modalHelpers,
+  });
+}
+
 function renderLogin(feedback = null) {
+  if (!app) {
+    console.error('[renderLogin] ERROR: app element not found!');
+    return;
+  }
+  
   app.innerHTML = `
     <section class="section-grid">
       <article class="card">
@@ -166,31 +263,36 @@ function renderLogin(feedback = null) {
         </header>
         <form id="loginForm" novalidate>
           <div>
-            <label for="loginName">Nome completo</label>
-            <input id="loginName" name="name" autocomplete="name" required placeholder="Ex.: Ana Costa" />
-          </div>
-          <div>
-            <label for="loginEmail">E-mail corporativo</label>
+            <label for="loginEmail">E-mail corporativo*</label>
             <input id="loginEmail" name="email" type="email" autocomplete="email" required placeholder="nome@empresa.com" />
           </div>
-          <div>
-            <label for="loginRole">Perfil de acesso</label>
-            <select id="loginRole" name="role" required>
-              <option value="" disabled selected>Selecione</option>
-              <option value="client">Cliente - Solicitar inspeções</option>
-              <option value="operator">Operador - Executar inspeções</option>
-            </select>
+          <div id="loginWelcomeBack" hidden>
+            <p id="loginWelcomeMsg" class="feedback" data-type="success"></p>
           </div>
-          <div id="companyField" class="conditional-field">
-            <label for="loginCompany">Empresa / Órgão</label>
-            <input id="loginCompany" name="company" placeholder="Informe a empresa ou órgão" />
-          </div>
-          <div id="certificationField" class="conditional-field" hidden>
-            <label for="loginCertification">Certificação K9</label>
-            <input id="loginCertification" name="certification" placeholder="Ex.: Condutor Nível II" />
+          <div id="loginNewUserFields">
+            <div>
+              <label for="loginName">Nome completo*</label>
+              <input id="loginName" name="name" autocomplete="name" required placeholder="Ex.: Ana Costa" />
+            </div>
+            <div>
+              <label for="loginRole">Perfil de acesso*</label>
+              <select id="loginRole" name="role" required>
+                <option value="" disabled selected>Selecione</option>
+                <option value="client">Cliente - Solicitar inspeções</option>
+                <option value="operator">Operador - Executar inspeções</option>
+              </select>
+            </div>
+            <div id="companyField" class="conditional-field">
+              <label for="loginCompany">Empresa / Órgão*</label>
+              <input id="loginCompany" name="company" placeholder="Informe a empresa ou órgão" />
+            </div>
+            <div id="certificationField" class="conditional-field" hidden>
+              <label for="loginCertification">Certificação K9*</label>
+              <input id="loginCertification" name="certification" placeholder="Ex.: Condutor Nível II" />
+            </div>
           </div>
           <p id="loginFeedback" role="status" aria-live="polite" class="feedback"></p>
-          <button class="primary-button" type="submit">Entrar no sistema</button>
+          <button id="loginSubmitBtn" class="primary-button" type="submit">Entrar no sistema</button>
         </form>
       </article>
       <article class="card">
@@ -200,6 +302,7 @@ function renderLogin(feedback = null) {
           <li><strong>Operadores</strong> recebem missões, atualizam checkpoints e emitem relatórios finais.</li>
           <li>Toda ação gera rastreabilidade automática para auditorias.</li>
         </ul>
+        <br></br>
         <div class="tag-list" aria-label="Recursos principais">
           <span class="tag">Registro de inspeções</span>
           <span class="tag">Linha do tempo</span>
@@ -214,11 +317,32 @@ function renderLogin(feedback = null) {
   const companyField = document.querySelector("#companyField");
   const certificationField = document.querySelector("#certificationField");
   const feedbackLabel = document.querySelector("#loginFeedback");
+  const emailInput = document.querySelector("#loginEmail");
+  const newUserFields = document.querySelector("#loginNewUserFields");
+  const welcomeBack = document.querySelector("#loginWelcomeBack");
+  const welcomeMsg = document.querySelector("#loginWelcomeMsg");
+  const submitBtn = document.querySelector("#loginSubmitBtn");
 
   if (feedback) {
     feedbackLabel.textContent = feedback.message;
     feedbackLabel.dataset.type = feedback.type;
   }
+
+  emailInput?.addEventListener("blur", () => {
+    const email = emailInput.value.trim().toLowerCase();
+    if (!email) return;
+    const found = state.users.find((item) => item.email === email);
+    if (found) {
+      welcomeMsg.textContent = `Bem-vindo de volta, ${found.name}! Clique em Entrar para continuar.`;
+      welcomeBack.hidden = false;
+      newUserFields.hidden = true;
+      submitBtn.textContent = "Entrar";
+    } else {
+      welcomeBack.hidden = true;
+      newUserFields.hidden = false;
+      submitBtn.textContent = "Entrar no sistema";
+    }
+  });
 
   roleSelect?.addEventListener("change", (event) => {
     const value = event.target.value;
@@ -244,15 +368,21 @@ function renderLogin(feedback = null) {
     const company = safeTrim(data.get("company"));
     const certification = safeTrim(data.get("certification"));
 
-    if (!name || !email || !role) {
-      feedbackLabel.textContent = "Preencha todas as informações obrigatórias.";
+    if (!email) {
+      feedbackLabel.textContent = "Preencha o e-mail.";
       feedbackLabel.dataset.type = "error";
       return;
     }
 
     let user = state.users.find((item) => item.email === email);
 
-    if (user && user.role !== role) {
+    if (!user && (!name || !role)) {
+      feedbackLabel.textContent = "Preencha todas as informações obrigatórias.";
+      feedbackLabel.dataset.type = "error";
+      return;
+    }
+
+    if (user && role && user.role !== role) {
       feedbackLabel.textContent = "Este e-mail já está associado a um perfil diferente.";
       feedbackLabel.dataset.type = "error";
       return;
@@ -283,116 +413,40 @@ function renderLogin(feedback = null) {
   });
 }
 
-function renderClientDashboard(user) {
-  const requests = state.requests.filter((request) => request.clientId === user.id);
-  const metrics = buildMetrics(requests);
-
-  app.innerHTML = `
-    <section class="section-grid" aria-label="Indicadores principais">
-      ${metricCard("Solicitações enviadas", metrics.total, "primary")}
-      ${metricCard("Em andamento", metrics.inProgress, "info")}
-      ${metricCard("Concluídas", metrics.completed, "success")}
-      ${metricCard("Próxima inspeção", metrics.nextInspectionLabel, "neutral")}
-    </section>
-
-    <section class="card" aria-labelledby="create-request-heading">
-      <div class="card__header">
-        <h2 id="create-request-heading">Nova solicitação</h2>
-        <p>Informe os dados da operação desejada. Você poderá anexar documentos na etapa de auditoria.</p>
-      </div>
-      <form id="requestForm" class="grid-two" novalidate>
-        <div>
-          <label for="requestTitle">Título da solicitação</label>
-          <input id="requestTitle" name="title" required placeholder="Ex.: Varredura em navio cargueiro" />
-        </div>
-        <div>
-          <label for="requestPort">Porto / Terminal</label>
-          <input id="requestPort" name="port" required placeholder="Informe o porto ou terminal" />
-        </div>
-        <div>
-          <label for="requestVessel">Embarcação</label>
-          <input id="requestVessel" name="vessel" required placeholder="Nome ou registro da embarcação" />
-        </div>
-        <div>
-          <label for="requestCargo">Tipo de carga</label>
-          <input id="requestCargo" name="cargo" placeholder="Ex.: Contêineres, combustíveis, graneis" />
-        </div>
-        <div>
-          <label for="requestDate">Data prevista</label>
-          <input id="requestDate" name="scheduledFor" type="date" required />
-        </div>
-        <div>
-          <label for="requestTags">Tags (separadas por vírgula)</label>
-          <input id="requestTags" name="tags" placeholder="auditoria, alto risco" />
-        </div>
-        <div class="full-row">
-          <label for="requestDescription">Contexto e observações</label>
-          <textarea id="requestDescription" name="description" required placeholder="Descreva o objetivo, restrições e equipes de apoio."></textarea>
-        </div>
-        <div class="full-row">
-          <button class="primary-button" type="submit">Enviar solicitação</button>
-        </div>
-      </form>
-    </section>
-
-    <section class="card" aria-labelledby="requests-heading">
-      <div class="card__header">
-        <div>
-          <h2 id="requests-heading">Solicitações cadastradas</h2>
-          <p>Gerencie inspeções, acompanhe o progresso em tempo real e baixe relatórios.</p>
-        </div>
-        <div class="tab-group" role="tablist">
-          ${buildStatusFilterTab("all", "Todas", uiState.filterStatus)}
-          ${buildStatusFilterTab("pending", "Pendentes", uiState.filterStatus)}
-          ${buildStatusFilterTab("in-progress", "Em andamento", uiState.filterStatus)}
-          ${buildStatusFilterTab("completed", "Concluídas", uiState.filterStatus)}
-        </div>
-      </div>
-      ${requests.length ? buildRequestTable(requests, uiState.filterStatus, user) : emptyState("Nenhuma solicitação cadastrada", "Crie sua primeira inspeção para acompanhar aqui.")}
-    </section>
-  `;
-
-  document
-    .querySelector("#requestForm")
-    ?.addEventListener("submit", (event) => handleCreateRequest(event, user));
-
-  app.querySelectorAll("[data-filter]").forEach((button) => {
-    button.addEventListener("click", () => {
-      uiState.filterStatus = button.dataset.filter;
-      renderClientDashboard(user);
-    });
-  });
-
-  attachRequestModalHandlers(user);
-}
-
-function renderOperatorDashboard(user) {
-  const requests = [...state.requests].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
-  const metrics = buildOperatorMetrics(requests, user.id);
-
-  app.innerHTML = `
-    <section class="section-grid" aria-label="Indicadores principais">
-      ${metricCard("Missões atribuídas", metrics.assignedToOperator, "primary")}
-      ${metricCard("Pendentes", metrics.pending, "warning")}
-      ${metricCard("Concluídas", metrics.completed, "success")}
-      ${metricCard("Próxima agenda", metrics.nextInspectionLabel, "neutral")}
-    </section>
-    <section class="card" aria-labelledby="board-heading">
-      <div class="card__header">
-        <h2 id="board-heading">Painel de operações</h2>
-        <p>Atualize checkpoints, registre evidências e finalize relatórios diretamente pelo dispositivo móvel.</p>
-      </div>
-      ${requests.length ? buildOperatorBoard(requests, user) : emptyState("Nenhuma operação disponível", "Aguarde novas solicitações dos clientes.")}
-    </section>
-  `;
-
-  attachRequestModalHandlers(user);
-}
 
 function handleCreateRequest(event, user) {
   event.preventDefault();
   const form = event.currentTarget;
   const data = new FormData(form);
+  const scheduledDate = typeof data.get("scheduledFor") === "string" ? data.get("scheduledFor") : "";
+  const scheduledTime = typeof data.get("scheduledTime") === "string" ? data.get("scheduledTime") : "";
+  const scheduledFor = combineDateTime(scheduledDate, scheduledTime);
+
+  // Validação de data
+  if (scheduledDate && scheduledTime) {
+    const scheduledDateTime = new Date(scheduledFor);
+    const now = new Date();
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(0, 0, 0, 0);
+
+    if (scheduledDateTime < now) {
+      showErrorNotification(
+        "Data inválida",
+        "Não é possível agendar inspeções no passado. Selecione uma data futura.",
+        6000
+      );
+      return;
+    }
+
+    if (scheduledDateTime < tomorrow) {
+      showWarningNotification(
+        "Atenção",
+        "Você está agendando para hoje. Certifique-se de que há tempo suficiente para preparação.",
+        5000
+      );
+    }
+  }
   const request = {
     id: uid("req"),
     clientId: user.id,
@@ -401,7 +455,7 @@ function handleCreateRequest(event, user) {
     port: safeTrim(data.get("port")),
     vessel: safeTrim(data.get("vessel")),
     cargo: safeTrim(data.get("cargo")) || "Não informado",
-    scheduledFor: data.get("scheduledFor"),
+    scheduledFor,
     description: safeTrim(data.get("description")),
     status: "pending",
     tags: parseTags(data.get("tags")),
@@ -418,7 +472,15 @@ function handleCreateRequest(event, user) {
     report: null,
   };
 
-  if (!request.title || !request.port || !request.vessel || !request.description || !request.scheduledFor) {
+  if (
+    !request.title ||
+    !request.port ||
+    !request.vessel ||
+    !request.description ||
+    !scheduledDate ||
+    !scheduledTime ||
+    !request.scheduledFor
+  ) {
     announce("Preencha todos os campos obrigatórios da solicitação.");
     return;
   }
@@ -427,8 +489,13 @@ function handleCreateRequest(event, user) {
   saveState();
   form.reset();
   form.querySelector("input, select, textarea")?.focus();
-  renderClientDashboard(user);
+  renderCurrentClientDashboard(user);
   announce("Solicitação registrada com sucesso.");
+  showSuccessNotification(
+    "Solicitação criada!",
+    `Inspeção "${request.title}" foi registrada com sucesso. ID: ${request.id.toUpperCase()}`,
+    6000
+  );
 }
 
 function attachRequestModalHandlers(user) {
@@ -449,24 +516,32 @@ function showRequestModal(request, viewer) {
   const assignedOperator = request.assignedOperatorId
     ? state.users.find((user) => user.id === request.assignedOperatorId)
     : null;
-  const client = resolveUser(request.clientId);
+  const client = resolveUserWrapper(request.clientId);
 
   const safeRequestIdBadge = escapeHtml(request.id.toUpperCase());
   const safeTitle = escapeHtml(request.title);
   const safePort = escapeHtml(request.port);
   const safeVessel = escapeHtml(request.vessel);
   const safeDescription = escapeHtml(request.description);
+  const safeCargo = escapeHtml(request.cargo || "Não informado");
   const safeClientName = escapeHtml(client.name);
   const safeOperatorName = assignedOperator
     ? escapeHtml(assignedOperator.name)
     : "";
+  const safeSchedule = escapeHtml(formatDate(request.scheduledFor));
+  const tagListMarkup =
+    request.tags?.length
+      ? request.tags
+          .map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`)
+          .join("")
+      : "";
 
   dialog.innerHTML = `
     <div class="modal__header">
       <div>
         <p class="badge">${safeRequestIdBadge}</p>
-        <h3>${safeTitle}</h3>
-        <p>${safePort} • ${safeVessel}</p>
+        <h3 data-field="title">${safeTitle}</h3>
+        <p data-field="header-summary">${safePort} • ${safeVessel}</p>
       </div>
       <div>
         ${buildStatusChip(request.status)}
@@ -475,11 +550,14 @@ function showRequestModal(request, viewer) {
     <div class="modal__body">
       <section aria-label="Detalhes da operação">
         <h4>Detalhes gerais</h4>
-        <p><strong>Cliente:</strong> ${safeClientName}</p>
-        ${assignedOperator ? `<p><strong>Operador:</strong> ${safeOperatorName}</p>` : ""}
-        <p><strong>Data prevista:</strong> ${formatDate(request.scheduledFor)}</p>
-        <p><strong>Descrição:</strong> ${safeDescription}</p>
-        ${request.tags?.length ? `<div class="tag-list">${request.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}</div>` : ""}
+        <p><strong>Cliente:</strong> <span data-field="client-name">${safeClientName}</span></p>
+        <p><strong>Operador:</strong> <span data-field="operator-name">${safeOperatorName || "A definir"}</span></p>
+        <p><strong>Data e horário:</strong> <span data-field="schedule">${safeSchedule}</span></p>
+        <p><strong>Porto / Terminal:</strong> <span data-field="port">${safePort}</span></p>
+        <p><strong>Embarcação:</strong> <span data-field="vessel">${safeVessel}</span></p>
+        <p><strong>Tipo de carga:</strong> <span data-field="cargo">${safeCargo}</span></p>
+        <p><strong>Descrição:</strong> <span data-field="description">${safeDescription}</span></p>
+        <div class="tag-list" data-field="tags" ${tagListMarkup ? "" : "hidden"}>${tagListMarkup}</div>
       </section>
       <section aria-label="Linha do tempo" class="timeline-section">
         <h4>Histórico</h4>
@@ -490,7 +568,8 @@ function showRequestModal(request, viewer) {
             .join("")}
         </div>
       </section>
-      ${viewer.role === "operator" ? operatorActions(request, viewer) : clientActions(request, viewer)}
+      ${viewer.role === "operator" ? operatorActions(request, viewer) : clientActions(request, viewer, { companyAvailability })}
+      ${createUploadArea(request.id)}
     </div>
     <div class="modal__footer">
       ${request.report ? `<button class="secondary-button" type="button" data-export>Gerar relatório</button>` : ""}
@@ -508,605 +587,238 @@ function showRequestModal(request, viewer) {
     renderApp();
   });
 
+  const handlerHelpers = {
+    safeTrim,
+    createTimelineEntry,
+    translateStatus,
+    saveState,
+    buildStatusChip,
+    timelineItem,
+    renderApp,
+    announce,
+    showSuccessNotification,
+    showInfoNotification,
+    showWarningNotification,
+    showErrorNotification,
+    combineDateTime,
+    parseTags,
+    formatDate,
+    updateRequestDetailsInModal,
+    handleRequestEdit,
+    handleRequestDelete: (req, dlg) => handleRequestDelete(req, dlg, handlerHelpers),
+    state,
+    confirm: (msg) => window.confirm(msg),
+  };
+
   if (viewer.role === "operator") {
     dialog
       .querySelector("#statusForm")
-      ?.addEventListener("submit", (event) => handleStatusUpdate(event, request, viewer, dialog));
+      ?.addEventListener("submit", (event) => handleStatusUpdate(event, request, viewer, dialog, handlerHelpers));
 
     dialog
       .querySelector("#progressForm")
-      ?.addEventListener("submit", (event) => handleProgressUpdate(event, request, viewer, dialog));
+      ?.addEventListener("submit", (event) => handleProgressUpdate(event, request, viewer, dialog, handlerHelpers));
 
     dialog
       .querySelector("#reportForm")
-      ?.addEventListener("submit", (event) => handleReportSubmission(event, request, viewer, dialog));
+      ?.addEventListener("submit", (event) => handleReportSubmission(event, request, viewer, dialog, handlerHelpers));
   } else {
     dialog
       .querySelector("#clientNoteForm")
-      ?.addEventListener("submit", (event) => handleClientNote(event, request, viewer, dialog));
+      ?.addEventListener("submit", (event) => handleClientNote(event, request, viewer, dialog, handlerHelpers));
+    setupClientManagement(dialog, request, viewer, handlerHelpers);
   }
 
   dialog.querySelector("[data-export]")?.addEventListener("click", () => exportReport(request));
-}
 
-function operatorActions(request, viewer) {
-  const isAssignedToViewer = request.assignedOperatorId === viewer.id;
-  return `
-    <section aria-label="Ações do operador" class="grid-two">
-      <div class="card" style="box-shadow:none; border:1px solid var(--border);">
-        <h4>Atualizar status</h4>
-        <form id="statusForm">
-          <div>
-            <label for="statusSelect">Status</label>
-            <select id="statusSelect" name="status" required>
-              <option value="pending" ${request.status === "pending" ? "selected" : ""}>Pendente</option>
-              <option value="in-progress" ${request.status === "in-progress" ? "selected" : ""}>Em andamento</option>
-              <option value="completed" ${request.status === "completed" ? "selected" : ""}>Concluída</option>
-            </select>
-          </div>
-          <div>
-            <label for="statusNotes">Notas</label>
-            <textarea id="statusNotes" name="notes" placeholder="Descreva a ação realizada"></textarea>
-          </div>
-          <button class="primary-button" type="submit">Salvar status</button>
-        </form>
-      </div>
-      <div class="card" style="box-shadow:none; border:1px solid var(--border);">
-        <h4>Registrar checkpoint</h4>
-        <form id="progressForm">
-          <div>
-            <label for="progressTitle">Título</label>
-            <input id="progressTitle" name="title" required placeholder="Ex.: Varredura de porão" />
-          </div>
-          <div>
-            <label for="progressDetails">Detalhes</label>
-            <textarea id="progressDetails" name="details" required placeholder="Descrição das evidências ou alertas"></textarea>
-          </div>
-          <div>
-            <label for="progressNext">Próximos passos</label>
-            <input id="progressNext" name="next" placeholder="Ex.: Coletar amostras adicionais" />
-          </div>
-          <button class="secondary-button" type="submit">Registrar checkpoint</button>
-        </form>
-      </div>
-    </section>
-    <section class="card" style="box-shadow:none; border:1px solid var(--border);" aria-label="Relatório final">
-      <h4>Relatório de conclusão</h4>
-      <form id="reportForm">
-        <div>
-          <label for="reportSummary">Resumo da operação</label>
-          <textarea id="reportSummary" name="summary" required placeholder="Resumo das etapas executadas">${request.report?.summary || ""}</textarea>
-        </div>
-        <div>
-          <label for="reportFindings">Achados / Ocorrências</label>
-          <textarea id="reportFindings" name="findings" required placeholder="Descreva os sinais, apreensões ou alertas">${request.report?.findings || ""}</textarea>
-        </div>
-        <div>
-          <label for="reportRecommendations">Recomendações</label>
-          <textarea id="reportRecommendations" name="recommendations" required placeholder="Sugestões de continuidade, reforços ou monitoramento">${request.report?.recommendations || ""}</textarea>
-        </div>
-        <button class="primary-button" type="submit">${request.report ? "Atualizar relatório" : "Encerrar missão"}</button>
-      </form>
-    </section>
-    ${!isAssignedToViewer ? `<p class="badge">Ao salvar atualizações você será automaticamente vinculado a esta missão.</p>` : ""}
-  `;
-}
-
-function clientActions(request, viewer) {
-  return `
-    <section aria-label="Observações do cliente" class="card" style="box-shadow:none; border:1px solid var(--border);">
-      <h4>Complementar informações</h4>
-      <form id="clientNoteForm">
-        <label for="clientNote">Mensagem para a equipe B&amp;B Educacão</label>
-        <textarea id="clientNote" name="note" placeholder="Informe restrições, mudanças de agenda ou liberações."></textarea>
-        <button class="secondary-button" type="submit">Enviar mensagem</button>
-      </form>
-    </section>
-  `;
-}
-
-function handleStatusUpdate(event, request, operator, dialog) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const data = new FormData(form);
-  const status = data.get("status");
-  const notes = safeTrim(data.get("notes"));
-  const now = new Date().toISOString();
-
-  if (!status) return;
-
-  request.status = status;
-  request.updatedAt = now;
-  request.assignedOperatorId = operator.id;
-  const entry = createTimelineEntry({
-    actor: operator,
-    title: `Status atualizado para ${translateStatus(status)}`,
-    description: notes || "Status modificado sem observações adicionais.",
-    category: "status",
-  });
-  request.timeline.push(entry);
-
-  saveState();
-  const select = form.querySelector("#statusSelect");
-  if (select) select.value = status;
-  const notesField = form.querySelector("#statusNotes");
-  if (notesField) notesField.value = "";
-  const statusChip = dialog.querySelector(".modal__header .status-chip");
-  if (statusChip) statusChip.outerHTML = buildStatusChip(status);
-  const timeline = dialog.querySelector(".timeline");
-  if (timeline) timeline.insertAdjacentHTML("afterbegin", timelineItem(entry));
-  renderApp();
-  announce("Status atualizado com sucesso.");
-}
-
-function handleProgressUpdate(event, request, operator, dialog) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const data = new FormData(form);
-  const title = safeTrim(data.get("title"));
-  const details = safeTrim(data.get("details"));
-  const next = safeTrim(data.get("next"));
-
-  if (!title || !details) return;
-
-  const entry = createTimelineEntry({
-    actor: operator,
-    title,
-    description: `${details}${next ? ` Próximos passos: ${next}.` : ""}`,
-    category: "operation",
-  });
-  request.timeline.push(entry);
-  request.updatedAt = new Date().toISOString();
-  request.assignedOperatorId = operator.id;
-
-  saveState();
-  form.reset();
-  const timeline = dialog.querySelector(".timeline");
-  if (timeline) timeline.insertAdjacentHTML("afterbegin", timelineItem(entry));
-  announce("Checkpoint registrado.");
-  renderApp();
-}
-
-function handleReportSubmission(event, request, operator, dialog) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const data = new FormData(form);
-  const summary = safeTrim(data.get("summary"));
-  const findings = safeTrim(data.get("findings"));
-  const recommendations = safeTrim(data.get("recommendations"));
-
-  if (!summary || !findings || !recommendations) {
-    announce("Preencha todos os campos do relatório.");
-    return;
-  }
-
-  request.report = {
-    summary,
-    findings,
-    recommendations,
-    generatedAt: new Date().toISOString(),
-    operatorId: operator.id,
+  // Inicializar sistema de upload
+  const uploadHelpers = {
+    findRequestById: (id) => state.requests.find((r) => r.id === id),
+    findRequestByEvidenceId: (evidenceId) => state.requests.find((r) => r.evidence && r.evidence.find((e) => e.id === evidenceId)),
+    findUserById: (id) => state.users.find((u) => u.id === id),
+    showErrorNotification,
+    showSuccessNotification,
+    showWarningNotification,
+    uid,
+    saveState,
+    escapeHtml,
+    formatDate,
+    confirm: (msg) => confirm(msg),
   };
-  request.status = "completed";
-  request.updatedAt = new Date().toISOString();
-  request.assignedOperatorId = operator.id;
-  request.timeline.push(
-    createTimelineEntry({
-      actor: operator,
-      title: "Relatório final registrado",
-      description: "Missão concluída e relatório disponibilizado ao cliente.",
-      category: "report",
-    })
-  );
-
-  saveState();
-  dialog.close();
-  announce("Relatório final salvo e missão concluída.");
+  initializeUploadArea(request.id, request, uploadHelpers);
 }
 
-function handleClientNote(event, request, client, dialog) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const data = new FormData(form);
-  const note = safeTrim(data.get("note"));
-  if (!note) return;
+// `operatorActions` and `clientActions` moved to `src/handlers/actions.js` (imported above)
 
-  const entry = createTimelineEntry({
-    actor: client,
-    title: "Cliente adicionou observação",
-    description: note,
-    category: "client",
-  });
-  request.timeline.push(entry);
-  request.updatedAt = new Date().toISOString();
-  saveState();
-  form.reset();
-  const timeline = dialog.querySelector(".timeline");
-  if (timeline) timeline.insertAdjacentHTML("afterbegin", timelineItem(entry));
-  announce("Mensagem adicionada ao histórico.");
-  renderApp();
-}
+// Client management handlers moved to `src/handlers/client.js`
 
-function buildMetrics(requests) {
-  const total = requests.length;
-  const inProgress = requests.filter((item) => item.status === "in-progress").length;
-  const completed = requests.filter((item) => item.status === "completed").length;
-  const upcomingDates = requests
-    .map((item) => item.scheduledFor)
-    .filter(Boolean)
-    .map((date) => new Date(date))
-    .filter((date) => date >= new Date());
-  const nextInspection = upcomingDates.sort((a, b) => a - b)[0];
+// Metrics handlers moved to `src/handlers/metrics.js` (imported above)
 
-  return {
-    total,
-    inProgress,
-    completed,
-    nextInspectionLabel: nextInspection ? formatDate(nextInspection.toISOString()) : "Sem agenda",
-  };
-}
+// `buildRequestTable` moved to `src/components/requests.js` (imported above)
+// `buildOperatorBoard` moved to `src/components/dashboards.js` (imported above)
+// `emptyState` moved to `src/components/dashboards.js` (imported above)
+// `buildStatusChip` moved to `src/components/ui.js` (imported above)
 
-function buildOperatorMetrics(requests, operatorId) {
-  const assignedToOperator = requests.filter((request) => request.assignedOperatorId === operatorId).length;
-  const pending = requests.filter((request) => request.status === "pending").length;
-  const completed = requests.filter((request) => request.status === "completed").length;
-  const upcomingDates = requests
-    .map((item) => item.scheduledFor)
-    .filter(Boolean)
-    .map((date) => new Date(date))
-    .filter((date) => date >= new Date());
-  const nextInspection = upcomingDates.sort((a, b) => a - b)[0];
+// `buildStatusFilterTab` moved to `src/components/ui.js`
 
-  return {
-    assignedToOperator,
-    pending,
-    completed,
-    nextInspectionLabel: nextInspection ? formatDate(nextInspection.toISOString()) : "Sem agenda",
-  };
-}
-
-function buildRequestTable(requests, filter, viewer) {
-  const filtered = filter === "all" ? requests : requests.filter((request) => request.status === filter);
-  if (!filtered.length) {
-    return emptyState("Nenhuma solicitação com este filtro", "Selecione outro status para visualizar.");
-  }
-
-  return `
-    <div class="table-wrapper">
-      <table class="table">
-        <thead>
-          <tr>
-            <th scope="col">Título</th>
-            <th scope="col">Data prevista</th>
-            <th scope="col">Status</th>
-            <th scope="col">Operador</th>
-            <th scope="col"><span class="sr-only">Ações</span></th>
-          </tr>
-        </thead>
-        <tbody>
-          ${filtered
-            .map((request) => {
-              const operatorName = request.assignedOperatorId ? resolveUser(request.assignedOperatorId)?.name : "-";
-              const safeTitle = escapeHtml(request.title);
-              const safePort = escapeHtml(request.port);
-              const safeOperator = escapeHtml(operatorName || "-");
-              const safeRequestId = escapeHtml(request.id);
-
-              return `
-                <tr>
-                  <td>
-                    <strong>${safeTitle}</strong>
-                    <p>${safePort}</p>
-                  </td>
-                  <td>${formatDate(request.scheduledFor)}</td>
-                  <td>${buildStatusChip(request.status)}</td>
-                  <td>${safeOperator}</td>
-                  <td>
-                    <button class="secondary-button" type="button" data-request="${safeRequestId}">Detalhes</button>
-                  </td>
-                </tr>
-              `;
-            })
-            .join("")}
-        </tbody>
-      </table>
-    </div>
-  `;
-}
-
-function buildOperatorBoard(requests, viewer) {
-  return `
-    <div class="section-grid">
-      ${requests
-        .map((request) => {
-          const client = resolveUser(request.clientId);
-          const safeTitle = escapeHtml(request.title);
-          const safeBadgeId = escapeHtml(request.id.toUpperCase());
-          const safePort = escapeHtml(request.port);
-          const safeVessel = escapeHtml(request.vessel);
-          const safeClientName = escapeHtml(client.name);
-          const safeRequestId = escapeHtml(request.id);
-
-          return `
-            <article class="card" aria-label="${safeTitle}">
-              <header>
-                <p class="badge">${safeBadgeId}</p>
-                <h3>${safeTitle}</h3>
-                <p>${safePort} • ${safeVessel}</p>
-              </header>
-              <p><strong>Cliente:</strong> ${safeClientName}</p>
-              <p><strong>Agenda:</strong> ${formatDate(request.scheduledFor)}</p>
-              <p><strong>Status:</strong> ${translateStatus(request.status)}</p>
-              <button class="primary-button" type="button" data-request="${safeRequestId}">${request.status === "completed" ? "Visualizar relatório" : "Atualizar missão"}</button>
-            </article>
-          `;
-        })
-        .join("")}
-    </div>
-  `;
-}
-
-function metricCard(label, value, tone = "primary") {
-  const toneClass =
-    tone === "success" ? "status--completed" : tone === "warning" ? "status--pending" : tone === "info" ? "status--in-progress" : "";
-  return `
-    <article class="card" aria-label="${label}">
-      <h2>${value}</h2>
-      <p>${label}</p>
-      ${toneClass ? `<span class="status-chip ${toneClass}">${label}</span>` : ""}
-    </article>
-  `;
-}
-
-function emptyState(title, subtitle) {
-  return `
-    <div class="empty-state">
-      <h3>${title}</h3>
-      <p>${subtitle}</p>
-    </div>
-  `;
-}
-
-function buildStatusChip(status) {
-  const map = {
-    pending: { label: "Pendente", className: "status--pending" },
-    "in-progress": { label: "Em andamento", className: "status--in-progress" },
-    completed: { label: "Concluída", className: "status--completed" },
-  };
-  const entry = map[status] || map.pending;
-  return `<span class="status-chip ${entry.className}">${entry.label}</span>`;
-}
-
-function buildStatusFilterTab(value, label, current) {
-  return `<button class="tab" type="button" role="tab" data-active="${current === value}" data-filter="${value}">${label}</button>`;
-}
-
-function timelineItem(event) {
-  return `
-    <article class="timeline__item">
-      <header>
-        <strong>${escapeHtml(event.title)}</strong>
-      </header>
-      <p>${escapeHtml(event.description)}</p>
-      <p class="timeline__meta">${formatDate(event.timestamp)} • ${escapeHtml(
-        event.actor?.name || "Usuário"
-      )}</p>
-    </article>
-  `;
-}
-
-function createTimelineEntry({ actor, title, description, category }) {
-  return {
-    id: uid("event"),
-    timestamp: new Date().toISOString(),
-    actor: {
-      id: actor.id,
-      name: actor.name,
-      role: actor.role,
-    },
-    title,
-    description,
-    category,
-  };
-}
-
-function formatDate(value) {
-  if (!value) return "Não informado";
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return "Não informado";
-  return new Intl.DateTimeFormat("pt-BR", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
-
-function parseTags(raw) {
-  if (!raw) return [];
-  return raw
-    .split(",")
-    .map((tag) => tag.trim())
-    .filter(Boolean);
-}
-
-function safeTrim(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function translateStatus(status) {
-  return {
-    pending: "Pendente",
-    "in-progress": "Em andamento",
-    completed: "Concluída",
-  }[status] || "Pendente";
-}
-
-function resolveUser(id) {
-  return state.users.find((user) => user.id === id) || { name: "Usuário" };
-}
+// timelineItem moved to `src/components/timeline.js`
 
 function exportReport(request) {
   if (!request.report) return;
-  const client = resolveUser(request.clientId);
-  const operator = resolveUser(request.report.operatorId || request.assignedOperatorId);
+  const client = resolveUserWrapper(request.clientId);
+  const operator = resolveUserWrapper(request.report.operatorId || request.assignedOperatorId);
 
-  const safeReportId = escapeHtml(request.id.toUpperCase());
-  const safeRequestTitle = escapeHtml(request.title);
-  const safeReportSummary = escapeHtml(request.report.summary);
-  const safeReportFindings = escapeHtml(request.report.findings);
-  const safeReportRecommendations = escapeHtml(request.report.recommendations);
-  const safeClientName = escapeHtml(client.name);
-  const safeOperatorName = escapeHtml(operator.name);
-  const safePort = escapeHtml(request.port);
-  const safeVessel = escapeHtml(request.vessel);
-
-  const popup = window.open("", "_blank");
-  if (!popup) {
-    alert("Permita pop-ups para gerar o relatório.");
+  // Usar exclusivamente o import ESM `jsPDF` (dependência explícita em package.json)
+  if (typeof jsPDF === 'undefined') {
+    showErrorNotification(
+      'Biblioteca não carregada',
+      'A biblioteca PDF não está disponível. Execute `npm install` para instalar dependências.',
+      5000
+    );
     return;
   }
 
-    popup.document.write(`
-      <!DOCTYPE html>
-      <html lang="pt-BR">
-        <head>
-          <meta charset="utf-8" />
-          <title>Relatório ${safeReportId}</title>
-          <style>
-            body { font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }
-            header { border-bottom: 2px solid #1d4ed8; padding-bottom: 1rem; margin-bottom: 2rem; }
-            h1 { margin: 0; }
-            section { margin-bottom: 1.5rem; }
-            .meta { color: #475569; }
-            .timeline { border-left: 2px solid #1d4ed8; padding-left: 1rem; }
-            .timeline article { margin-bottom: 1rem; }
-            footer { margin-top: 3rem; font-size: 0.9rem; color: #475569; }
-          </style>
-        </head>
-        <body>
-          <header>
-            <h1>Relatório B&amp;B Educacão - ${safeRequestTitle}</h1>
-            <p class="meta">Código ${safeReportId} • ${formatDate(request.report.generatedAt)}</p>
-          </header>
-          <section>
-            <h2>Resumo executivo</h2>
-            <p>${safeReportSummary}</p>
-          </section>
-          <section>
-            <h2>Achados / Ocorrências</h2>
-            <p>${safeReportFindings}</p>
-          </section>
-          <section>
-            <h2>Recomendações</h2>
-            <p>${safeReportRecommendations}</p>
-          </section>
-          <section>
-            <h2>Dados da operação</h2>
-            <p><strong>Cliente:</strong> ${safeClientName}</p>
-            <p><strong>Operador responsável:</strong> ${safeOperatorName}</p>
-            <p><strong>Porto:</strong> ${safePort}</p>
-            <p><strong>Embarcação:</strong> ${safeVessel}</p>
-            <p><strong>Data prevista:</strong> ${formatDate(request.scheduledFor)}</p>
-          </section>
-          <section>
-            <h2>Linha do tempo</h2>
-            <div class="timeline">
-              ${request.timeline
-                .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
-                .map((event) => {
-                  const safeEventTitle = escapeHtml(event.title);
-                  const safeEventActor = escapeHtml(event.actor?.name || "Usuário");
-                  const safeEventDescription = escapeHtml(event.description);
-
-                  return `
-                    <article>
-                      <strong>${safeEventTitle}</strong>
-                      <p class="meta">${formatDate(event.timestamp)} • ${safeEventActor}</p>
-                      <p>${safeEventDescription}</p>
-                    </article>
-                  `;
-                })
-                .join("")}
-            </div>
-          </section>
-          <footer>
-            <p>B&amp;B Educacão • Fiscalização marítima com cães farejadores • Relatório gerado automaticamente pelo portal.</p>
-          </footer>
-        </body>
-      </html>
-    `);
-    popup.document.close();
-    popup.focus();
-    popup.print();
+  try {
+    const doc = new jsPDF();
+    
+    // Configurações do documento
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 20;
+    let yPosition = 20;
+    
+    // Função para adicionar texto com quebra de linha
+    const addText = (text, x = margin, y = yPosition, options = {}) => {
+      const lines = doc.splitTextToSize(text, pageWidth - 2 * margin);
+      doc.text(lines, x, y, options);
+      return y + (lines.length * 6) + 5;
+    };
+    
+    // Cabeçalho
+    doc.setFontSize(20);
+    doc.setFont(undefined, 'bold');
+    yPosition = addText(`Relatório B&B Educacão - ${request.title}`, margin, yPosition);
+    
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    yPosition = addText(`Código: ${request.id.toUpperCase()} • ${formatDate(request.report.generatedAt)}`, margin, yPosition);
+    
+    // Linha separadora
+    yPosition += 10;
+    doc.line(margin, yPosition, pageWidth - margin, yPosition);
+    yPosition += 15;
+    
+    // Resumo executivo
+    doc.setFontSize(14);
+    doc.setFont(undefined, 'bold');
+    yPosition = addText('Resumo Executivo', margin, yPosition);
+    
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    yPosition = addText(request.report.summary, margin, yPosition);
+    yPosition += 10;
+    
+    // Achados
+    doc.setFontSize(14);
+    doc.setFont(undefined, 'bold');
+    yPosition = addText('Achados / Ocorrências', margin, yPosition);
+    
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    yPosition = addText(request.report.findings, margin, yPosition);
+    yPosition += 10;
+    
+    // Recomendações
+    doc.setFontSize(14);
+    doc.setFont(undefined, 'bold');
+    yPosition = addText('Recomendações', margin, yPosition);
+    
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    yPosition = addText(request.report.recommendations, margin, yPosition);
+    yPosition += 10;
+    
+    // Dados da operação
+    doc.setFontSize(14);
+    doc.setFont(undefined, 'bold');
+    yPosition = addText('Dados da Operação', margin, yPosition);
+    
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    yPosition = addText(`Cliente: ${client.name}`, margin, yPosition);
+    yPosition = addText(`Operador: ${operator.name}`, margin, yPosition);
+    yPosition = addText(`Porto: ${request.port}`, margin, yPosition);
+    yPosition = addText(`Embarcação: ${request.vessel}`, margin, yPosition);
+    yPosition = addText(`Data: ${formatDate(request.scheduledFor)}`, margin, yPosition);
+    yPosition += 10;
+    
+    // Evidências
+    if (request.evidence && request.evidence.length > 0) {
+      doc.setFontSize(14);
+      doc.setFont(undefined, 'bold');
+      yPosition = addText('Evidências Anexadas', margin, yPosition);
+      
+      doc.setFontSize(10);
+      doc.setFont(undefined, 'normal');
+      request.evidence.forEach(evidence => {
+        yPosition = addText(`• ${evidence.name} (${formatFileSize(evidence.size)})`, margin, yPosition);
+      });
+      yPosition += 10;
+    }
+    
+    // Linha do tempo
+    doc.setFontSize(14);
+    doc.setFont(undefined, 'bold');
+    yPosition = addText('Linha do Tempo', margin, yPosition);
+    
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    const sortedTimeline = request.timeline.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    sortedTimeline.forEach(event => {
+      yPosition = addText(`${formatDate(event.timestamp)} - ${event.title}`, margin, yPosition);
+      yPosition = addText(`Por: ${event.actor?.name || 'Usuário'}`, margin + 10, yPosition);
+      yPosition = addText(event.description, margin + 10, yPosition);
+      yPosition += 5;
+    });
+    
+    // Rodapé
+    const pageHeight = doc.internal.pageSize.getHeight();
+    doc.setFontSize(8);
+    doc.setFont(undefined, 'italic');
+    doc.text('B&B Educacão • Fiscalização marítima com cães farejadores', pageWidth/2, pageHeight - 10, { align: 'center' });
+    
+    // Salvar o PDF
+    const fileName = `relatorio_${request.id}_${new Date().toISOString().split('T')[0]}.pdf`;
+    doc.save(fileName);
+    
+    showSuccessNotification(
+      "PDF gerado!",
+      `Relatório ${request.id.toUpperCase()} foi exportado como PDF`,
+      4000
+    );
+    
+  } catch (error) {
+    console.error('Erro ao gerar PDF:', error);
+    showErrorNotification(
+      "Erro ao gerar PDF",
+      "Ocorreu um erro ao gerar o arquivo PDF. Tente novamente.",
+      5000
+    );
   }
+}
 
 function handleLogout() {
   session = null;
   saveSession();
+  hideUserInfo(); // Limpar informações do usuário
+  logoutButton.hidden = true; // Garantir que o botão sair seja escondido
   renderApp();
   focusMain();
 }
 
-function loadState() {
-  if (typeof localStorage === "undefined") {
-    return clone(defaultState);
-  }
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (!stored) return clone(defaultState);
-    const parsed = JSON.parse(stored);
-    return {
-      users: Array.isArray(parsed.users) ? parsed.users : clone(defaultState.users),
-      requests: Array.isArray(parsed.requests) ? parsed.requests : clone(defaultState.requests),
-    };
-  } catch (error) {
-    console.error("Erro ao carregar estado, utilizando padrão", error);
-    return clone(defaultState);
-  }
-}
+// Sistema de Notificações Visuais
+// (moved to `src/ui/notifications.js`)
 
-function saveState() {
-  if (typeof localStorage === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-}
-
-function loadSession() {
-  if (typeof localStorage === "undefined") return null;
-  try {
-    const stored = localStorage.getItem(SESSION_KEY);
-    return stored ? JSON.parse(stored) : null;
-  } catch (error) {
-    return null;
-  }
-}
-
-function saveSession() {
-  if (typeof localStorage === "undefined") return;
-  if (session) {
-    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  } else {
-    localStorage.removeItem(SESSION_KEY);
-  }
-}
-
-function uid(prefix = "id") {
-  return `${prefix}-${Math.random().toString(36).slice(2, 8)}-${Date.now().toString(36)}`;
-}
-
-function announce(message) {
-  const regionId = "guardcan-live";
-  let region = document.getElementById(regionId);
-  if (!region) {
-    region = document.createElement("div");
-    region.id = regionId;
-    region.className = "sr-only";
-    region.setAttribute("aria-live", "polite");
-    document.body.appendChild(region);
-  }
-  region.textContent = message;
-}
+// Search functions moved to `src/components/search.js`
 
 function focusMain() {
   requestAnimationFrame(() => {
@@ -1114,27 +826,78 @@ function focusMain() {
   });
 }
 
-function loadTheme() {
-  if (typeof localStorage === "undefined") {
-    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+// Função para atualizar informações do usuário no header
+function updateUserInfo(user) {
+  if (!user || !userInfo || !userName || !userRole || !userAvatar) return;
+
+  // Mostrar informações do usuário
+  userInfo.hidden = false;
+  
+  // Atualizar nome
+  userName.textContent = user.name;
+  
+  // Atualizar role com texto mais amigável
+  const roleText = user.role === "client" ? "Cliente" : "Operador";
+  userRole.textContent = roleText;
+  
+  // Atualizar avatar com a inicial do nome do usuário
+  const initial = user.name ? user.name.charAt(0).toUpperCase() : "?";
+  userAvatar.textContent = initial;
+
+  if (user.role === "operator") {
+    userInfo.className = "user-info operator";
+    const certification = user.certification || "Certificação não informada";
+    userInfo.title = `${user.name} (${roleText})\n${certification}`;
+  } else {
+    userInfo.className = "user-info client";
+    const company = user.company || "Empresa não informada";
+    userInfo.title = `${user.name} (${roleText})\n${company}`;
   }
-  return localStorage.getItem(THEME_KEY) || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
 }
 
-function applyTheme(theme) {
-  document.documentElement.setAttribute("data-theme", theme);
-  if (typeof localStorage !== "undefined") {
-    localStorage.setItem(THEME_KEY, theme);
+// Função para esconder informações do usuário
+function hideUserInfo() {
+  if (userInfo) {
+    userInfo.hidden = true;
+    // Limpar dados do card
+    if (userName) userName.textContent = "";
+    if (userRole) userRole.textContent = "";
+    if (userAvatar) userAvatar.textContent = "👤";
+    // Remover classes específicas do role
+    userInfo.className = "user-info";
+    // Limpar tooltip
+    userInfo.title = "";
   }
-  updateThemeToggleLabel(theme);
 }
 
-function toggleTheme() {
-  const current = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
-  applyTheme(current === "dark" ? "light" : "dark");
+// ========== INICIALIZAÇÃO DA APLICAÇÃO ==========
+
+function initApp() {
+  // Atualizar ano no footer
+  const yearSpan = document.querySelector('#year');
+  if (yearSpan) {
+    yearSpan.textContent = new Date().getFullYear().toString();
+  }
+
+  // Renderizar aplicação com base no estado de sessão
+  if (session.currentUserId) {
+    const currentUser = state.users.find((u) => u.id === session.currentUserId);
+    if (currentUser) {
+      renderApp();
+    } else {
+      renderLogin({ message: "Sessão inválida. Faça login novamente.", type: "error" });
+    }
+  } else {
+    renderLogin();
+  }
+
+  // Configurar evento de logout (usa o logoutButton do módulo)
+  logoutButton?.removeEventListener('click', handleLogout);
+  logoutButton?.addEventListener('click', handleLogout);
 }
 
-function updateThemeToggleLabel(theme) {
-  if (!themeToggle) return;
-  themeToggle.textContent = theme === "dark" ? "Modo claro" : "Modo escuro";
+if (document.readyState !== 'loading') {
+  initApp();
+} else {
+  document.addEventListener('DOMContentLoaded', initApp);
 }
