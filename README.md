@@ -9,8 +9,8 @@ Protótipo responsivo para gestão de operações de fiscalização marítima co
 
 ## Pré-requisitos
 
-
-Bruno's personal website prototype.
+- [Node.js](https://nodejs.org/) >= 18
+- npm (incluso no Node.js)
 
 ## Desenvolvimento (local)
 
@@ -65,9 +65,11 @@ npm run coverage
 ### Métricas Atuais
 
 - **157 testes** implementados e passando (100%) ✅
-- **Cobertura global:** 37.14% statements (varia de 0% a 100% por módulo)
+- **Cobertura dos módulos `src/`:** 37.14% statements (varia de 0% a 100% por módulo)
 - **Funções cobertas:** 76.56% | **Branches:** 68.34%
-- **Thresholds:** 80% statements/functions, 75% branches
+- **Thresholds configurados:** 80% statements/functions, 75% branches (aplicados apenas a `src/**/*.js`)
+
+> A cobertura mede somente os módulos extraídos para `src/`. O arquivo principal `assets/app.js` ainda está em migração gradual para essa estrutura.
 
 📊 [Relatório de Cobertura Detalhado](./coverage/index.html)
 
@@ -99,7 +101,7 @@ Configurado para rodar **automaticamente em cada Pull Request**:
 
 **Branch Protection:** `main` requer que todos os testes passem antes de merge.
 
-📚 [Guia de Contribuição](./CONTRIBUTING.md) | ⚡ [Referência Rápida](./QUICK_REFERENCE.md)
+## Como executar
 
 1. Faça o download/clonagem do repositório.
    ```bash
@@ -144,7 +146,6 @@ Configurado para rodar **automaticamente em cada Pull Request**:
 
 ## Recursos adicionais
 
-- Alternância de tema claro/escuro persistido no navegador.
 - Layout mobile-first utilizando CSS Grid e tipografia flexível.
 - Elementos com suporte a teclado, mensagens de feedback em região `aria-live` e foco gerenciado.
 - Conjunto inicial de dados demonstrativos para acelerar a avaliação.
@@ -153,10 +154,37 @@ Configurado para rodar **automaticamente em cada Pull Request**:
 
 ```
 ├── assets/
-│   ├── app.js        # Regras de negócio, estado e renderização da interface
-│   └── styles.css    # Design system leve com suporte a tema dinâmico
-├── index.html        # Shell da aplicação e contêiner principal
-└── README.md
+│   ├── app.js              # App principal (monolito em migração gradual para src/)
+│   └── styles.css          # Design system com suporte a tema dinâmico
+├── src/
+│   ├── main.js             # Entry point do Vite (importa assets/app.js)
+│   ├── components/
+│   │   ├── calendar.js     # Seletor de data/hora
+│   │   ├── dashboards.js   # Painéis do cliente e do operador
+│   │   ├── modal.js        # Componente de modal genérico
+│   │   ├── requests.js     # Listagem e filtros de solicitações
+│   │   ├── search.js       # Busca de operações
+│   │   ├── timeline.js     # Linha do tempo de eventos
+│   │   ├── ui.js           # Chips de status e elementos visuais
+│   │   └── upload.js       # Upload e galeria de evidências
+│   ├── handlers/
+│   │   ├── actions.js      # Ações de cliente e operador
+│   │   ├── client.js       # Notas e gestão do cliente
+│   │   ├── metrics.js      # Cálculo de métricas do dashboard
+│   │   ├── progress.js     # Atualização de progresso/checkpoints
+│   │   ├── report.js       # Submissão de relatório final
+│   │   └── status.js       # Atualização de status da operação
+│   ├── ui/
+│   │   └── notifications.js # Notificações de sucesso/erro/aviso
+│   └── utils/
+│       ├── dom.js           # Manipulação do DOM e acessibilidade
+│       ├── helpers.js       # Utilitários de negócio (tags, usuários)
+│       ├── misc.js          # Formatação de datas, UIDs, tamanhos
+│       ├── storage.js       # Leitura/escrita no localStorage
+│       └── string.js        # Sanitização e trim seguro
+├── test/                   # 157 testes unitários (Vitest + jsdom)
+├── index.html              # Shell da aplicação
+└── vite.config.js          # Configuração do bundler
 ```
 
 ## Próximos passos sugeridos
@@ -186,8 +214,6 @@ Para contribuir com o projeto:
 - ✅ Cobertura mantida: `npm run test:coverage`
 - ✅ Nova funcionalidade tem testes
 - ✅ Documentação atualizada
-
-📖 [Guia Completo de Contribuição](./CONTRIBUTING.md)
 
 ## Licença
 

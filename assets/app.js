@@ -2,23 +2,26 @@ import { jsPDF } from 'jspdf';
 import { escapeHtml, safeTrim } from '../src/utils/string.js';
 import { formatDate, uid, combineDateTime, formatFileSize } from '../src/utils/misc.js';
 import { announce } from '../src/utils/dom.js';
-import { parseTags, resolveUser } from '../src/utils/helpers.js';
+import { parseTags, resolveUser, translateStatus } from '../src/utils/helpers.js';
 import { loadState as loadStateFromStorage, saveState as saveStateToStorage, loadSession as loadSessionFromStorage, saveSession as saveSessionToStorage } from '../src/utils/storage.js';
-import { timelineItem, createTimelineEntry } from '../src/components/timeline.js';
-import { buildStatusChip } from '../src/components/ui.js';
+import { timelineItem, createTimelineEntry, updateRequestDetailsInModal } from '../src/components/timeline.js';
+import { metricCard, buildStatusFilterTab, createSearchInterface, buildStatusChip } from '../src/components/ui.js';
+import { buildMetrics, buildOperatorMetrics } from '../src/handlers/metrics.js';
+import { buildRequestTable } from '../src/components/requests.js';
+import { initializeCalendar } from '../src/components/calendar.js';
+import { initializeSearch, performSearch as performSearchFn, displaySearchResults as displaySearchResultsFn } from '../src/components/search.js';
+import { attachRequestModalHandlers as attachModalHandlersFn } from '../src/components/modal.js';
 import { emptyState, buildOperatorBoard, renderClientDashboard, renderOperatorDashboard } from '../src/components/dashboards.js';
 import { handleStatusUpdate } from '../src/handlers/status.js';
 import { handleProgressUpdate } from '../src/handlers/progress.js';
 import { handleReportSubmission } from '../src/handlers/report.js';
-import { handleClientNote, setupClientManagement, handleRequestDelete } from '../src/handlers/client.js';
+import { handleClientNote, setupClientManagement, handleRequestDelete, handleRequestEdit } from '../src/handlers/client.js';
 import { operatorActions, clientActions } from '../src/handlers/actions.js';
 import { createUploadArea, initializeUploadArea, handleFileUpload, renderEvidenceGallery, removeEvidence, viewEvidence } from '../src/components/upload.js';
 import { showSuccessNotification, showErrorNotification, showWarningNotification, showInfoNotification } from '../src/ui/notifications.js';
-import { loadTheme as loadThemeFromStorage, applyTheme as applyThemeToDOM, toggleTheme as toggleThemeInDOM } from '../src/ui/theme.js';
 
 const STORAGE_KEY = "guardcan:data:v1";
 const SESSION_KEY = "guardcan:session";
-const THEME_KEY = "guardcan:theme";
 
 // `clone` moved to `src/utils/dom.js`
 
@@ -125,14 +128,13 @@ const defaultState = {
 
 const app = document.querySelector("#app");
 const logoutButton = document.querySelector("#logoutButton");
-const themeToggle = document.querySelector("#themeToggle");
 const yearLabel = document.querySelector("#year");
 const userInfo = document.querySelector("#userInfo");
 const userName = document.querySelector("#userName");
 const userRole = document.querySelector("#userRole");
 const userAvatar = document.querySelector("#userAvatar");
 
-const state = loadStateFromStorage() || defaultState;
+const state = loadStateFromStorage(defaultState);
 let session = loadSessionFromStorage() || {};
 
 // Wrapper para resolveUser que injeta state.users
@@ -142,14 +144,16 @@ const uiState = {
   filterStatus: "all",
 };
 
-const theme = loadThemeFromStorage();
-applyThemeToDOM(theme);
+// Wrapper functions — defined here so they are available before the first renderApp() call below
+const loadState = () => loadStateFromStorage(defaultState);
+const saveState = () => saveStateToStorage(state);
+const loadSession = () => loadSessionFromStorage();
+const saveSession = () => saveSessionToStorage(session);
 
 if (yearLabel) {
   yearLabel.textContent = String(new Date().getFullYear());
 }
 
-themeToggle?.addEventListener("click", toggleThemeInDOM);
 logoutButton?.addEventListener("click", handleLogout);
 
 // Garantir que o botão sair esteja escondido na inicialização
@@ -177,10 +181,71 @@ function renderApp() {
   updateUserInfo(currentUser);
 
   if (currentUser.role === "client") {
-    renderClientDashboard(currentUser);
+    renderCurrentClientDashboard(currentUser);
   } else {
-    renderOperatorDashboard(currentUser);
+    renderCurrentOperatorDashboard(currentUser);
   }
+}
+
+function renderCurrentOperatorDashboard(user) {
+  renderOperatorDashboard({
+    user,
+    state,
+    buildOperatorMetrics,
+    metricCard,
+    buildOperatorBoard,
+    emptyState,
+    app,
+    attachRequestModalHandlers,
+  });
+}
+
+function renderCurrentClientDashboard(user) {
+  const modalHelpers = {
+    findRequestById: (id) => state.requests.find((r) => r.id === id),
+    showRequestModal: (request) => showRequestModal(request, user),
+    resolveUser: resolveUserWrapper,
+    escapeHtml,
+    formatDate,
+    buildStatusChip,
+    emptyState,
+    session,
+    showSuccessNotification,
+    showInfoNotification,
+    displaySearchResults: (requests) =>
+      displaySearchResultsFn(requests, user, {
+        escapeHtml,
+        formatDate,
+        buildStatusChip,
+        resolveUser: resolveUserWrapper,
+        emptyState,
+      }),
+  };
+
+  renderClientDashboard({
+    user,
+    state,
+    uiState,
+    buildMetrics,
+    metricCard,
+    buildStatusFilterTab,
+    createSearchInterface,
+    buildRequestTable,
+    handleCreateRequest,
+    initCalendar: (requests, u) =>
+      initializeCalendar(requests, u, {
+        showRequestModal: (request) => showRequestModal(request, u),
+      }),
+    initSearchModule: initializeSearch,
+    performSearchModule: performSearchFn,
+    displaySearchResultsModule: displaySearchResultsFn,
+    app,
+    saveState,
+    renderApp,
+    companyAvailability,
+    attachModalHandlers: (_container, u) => attachRequestModalHandlers(u),
+    modalHelpers,
+  });
 }
 
 function renderLogin(feedback = null) {
@@ -198,31 +263,36 @@ function renderLogin(feedback = null) {
         </header>
         <form id="loginForm" novalidate>
           <div>
-            <label for="loginName">Nome completo</label>
-            <input id="loginName" name="name" autocomplete="name" required placeholder="Ex.: Ana Costa" />
-          </div>
-          <div>
-            <label for="loginEmail">E-mail corporativo</label>
+            <label for="loginEmail">E-mail corporativo*</label>
             <input id="loginEmail" name="email" type="email" autocomplete="email" required placeholder="nome@empresa.com" />
           </div>
-          <div>
-            <label for="loginRole">Perfil de acesso</label>
-            <select id="loginRole" name="role" required>
-              <option value="" disabled selected>Selecione</option>
-              <option value="client">Cliente - Solicitar inspeções</option>
-              <option value="operator">Operador - Executar inspeções</option>
-            </select>
+          <div id="loginWelcomeBack" hidden>
+            <p id="loginWelcomeMsg" class="feedback" data-type="success"></p>
           </div>
-          <div id="companyField" class="conditional-field">
-            <label for="loginCompany">Empresa / Órgão</label>
-            <input id="loginCompany" name="company" placeholder="Informe a empresa ou órgão" />
-          </div>
-          <div id="certificationField" class="conditional-field" hidden>
-            <label for="loginCertification">Certificação K9</label>
-            <input id="loginCertification" name="certification" placeholder="Ex.: Condutor Nível II" />
+          <div id="loginNewUserFields">
+            <div>
+              <label for="loginName">Nome completo*</label>
+              <input id="loginName" name="name" autocomplete="name" required placeholder="Ex.: Ana Costa" />
+            </div>
+            <div>
+              <label for="loginRole">Perfil de acesso*</label>
+              <select id="loginRole" name="role" required>
+                <option value="" disabled selected>Selecione</option>
+                <option value="client">Cliente - Solicitar inspeções</option>
+                <option value="operator">Operador - Executar inspeções</option>
+              </select>
+            </div>
+            <div id="companyField" class="conditional-field">
+              <label for="loginCompany">Empresa / Órgão*</label>
+              <input id="loginCompany" name="company" placeholder="Informe a empresa ou órgão" />
+            </div>
+            <div id="certificationField" class="conditional-field" hidden>
+              <label for="loginCertification">Certificação K9*</label>
+              <input id="loginCertification" name="certification" placeholder="Ex.: Condutor Nível II" />
+            </div>
           </div>
           <p id="loginFeedback" role="status" aria-live="polite" class="feedback"></p>
-          <button class="primary-button" type="submit">Entrar no sistema</button>
+          <button id="loginSubmitBtn" class="primary-button" type="submit">Entrar no sistema</button>
         </form>
       </article>
       <article class="card">
@@ -232,6 +302,7 @@ function renderLogin(feedback = null) {
           <li><strong>Operadores</strong> recebem missões, atualizam checkpoints e emitem relatórios finais.</li>
           <li>Toda ação gera rastreabilidade automática para auditorias.</li>
         </ul>
+        <br></br>
         <div class="tag-list" aria-label="Recursos principais">
           <span class="tag">Registro de inspeções</span>
           <span class="tag">Linha do tempo</span>
@@ -246,11 +317,32 @@ function renderLogin(feedback = null) {
   const companyField = document.querySelector("#companyField");
   const certificationField = document.querySelector("#certificationField");
   const feedbackLabel = document.querySelector("#loginFeedback");
+  const emailInput = document.querySelector("#loginEmail");
+  const newUserFields = document.querySelector("#loginNewUserFields");
+  const welcomeBack = document.querySelector("#loginWelcomeBack");
+  const welcomeMsg = document.querySelector("#loginWelcomeMsg");
+  const submitBtn = document.querySelector("#loginSubmitBtn");
 
   if (feedback) {
     feedbackLabel.textContent = feedback.message;
     feedbackLabel.dataset.type = feedback.type;
   }
+
+  emailInput?.addEventListener("blur", () => {
+    const email = emailInput.value.trim().toLowerCase();
+    if (!email) return;
+    const found = state.users.find((item) => item.email === email);
+    if (found) {
+      welcomeMsg.textContent = `Bem-vindo de volta, ${found.name}! Clique em Entrar para continuar.`;
+      welcomeBack.hidden = false;
+      newUserFields.hidden = true;
+      submitBtn.textContent = "Entrar";
+    } else {
+      welcomeBack.hidden = true;
+      newUserFields.hidden = false;
+      submitBtn.textContent = "Entrar no sistema";
+    }
+  });
 
   roleSelect?.addEventListener("change", (event) => {
     const value = event.target.value;
@@ -276,15 +368,21 @@ function renderLogin(feedback = null) {
     const company = safeTrim(data.get("company"));
     const certification = safeTrim(data.get("certification"));
 
-    if (!name || !email || !role) {
-      feedbackLabel.textContent = "Preencha todas as informações obrigatórias.";
+    if (!email) {
+      feedbackLabel.textContent = "Preencha o e-mail.";
       feedbackLabel.dataset.type = "error";
       return;
     }
 
     let user = state.users.find((item) => item.email === email);
 
-    if (user && user.role !== role) {
+    if (!user && (!name || !role)) {
+      feedbackLabel.textContent = "Preencha todas as informações obrigatórias.";
+      feedbackLabel.dataset.type = "error";
+      return;
+    }
+
+    if (user && role && user.role !== role) {
       feedbackLabel.textContent = "Este e-mail já está associado a um perfil diferente.";
       feedbackLabel.dataset.type = "error";
       return;
@@ -391,7 +489,7 @@ function handleCreateRequest(event, user) {
   saveState();
   form.reset();
   form.querySelector("input, select, textarea")?.focus();
-  renderClientDashboard(user);
+  renderCurrentClientDashboard(user);
   announce("Solicitação registrada com sucesso.");
   showSuccessNotification(
     "Solicitação criada!",
@@ -489,23 +587,46 @@ function showRequestModal(request, viewer) {
     renderApp();
   });
 
+  const handlerHelpers = {
+    safeTrim,
+    createTimelineEntry,
+    translateStatus,
+    saveState,
+    buildStatusChip,
+    timelineItem,
+    renderApp,
+    announce,
+    showSuccessNotification,
+    showInfoNotification,
+    showWarningNotification,
+    showErrorNotification,
+    combineDateTime,
+    parseTags,
+    formatDate,
+    updateRequestDetailsInModal,
+    handleRequestEdit,
+    handleRequestDelete: (req, dlg) => handleRequestDelete(req, dlg, handlerHelpers),
+    state,
+    confirm: (msg) => window.confirm(msg),
+  };
+
   if (viewer.role === "operator") {
     dialog
       .querySelector("#statusForm")
-      ?.addEventListener("submit", (event) => handleStatusUpdate(event, request, viewer, dialog));
+      ?.addEventListener("submit", (event) => handleStatusUpdate(event, request, viewer, dialog, handlerHelpers));
 
     dialog
       .querySelector("#progressForm")
-      ?.addEventListener("submit", (event) => handleProgressUpdate(event, request, viewer, dialog));
+      ?.addEventListener("submit", (event) => handleProgressUpdate(event, request, viewer, dialog, handlerHelpers));
 
     dialog
       .querySelector("#reportForm")
-      ?.addEventListener("submit", (event) => handleReportSubmission(event, request, viewer, dialog));
+      ?.addEventListener("submit", (event) => handleReportSubmission(event, request, viewer, dialog, handlerHelpers));
   } else {
     dialog
       .querySelector("#clientNoteForm")
-      ?.addEventListener("submit", (event) => handleClientNote(event, request, viewer, dialog));
-    setupClientManagement(dialog, request, viewer);
+      ?.addEventListener("submit", (event) => handleClientNote(event, request, viewer, dialog, handlerHelpers));
+    setupClientManagement(dialog, request, viewer, handlerHelpers);
   }
 
   dialog.querySelector("[data-export]")?.addEventListener("click", () => exportReport(request));
@@ -685,14 +806,6 @@ function exportReport(request) {
   }
 }
 
-// `loadState`, `saveState`, `loadSession`, `saveSession` moved to `src/utils/storage.js`
-
-// Wrapper functions to maintain compatibility
-const loadState = () => loadStateFromStorage(defaultState);
-const saveState = () => saveStateToStorage(state);
-const loadSession = () => loadSessionFromStorage();
-const saveSession = () => saveSessionToStorage(session);
-
 function handleLogout() {
   session = null;
   saveSession();
@@ -713,13 +826,6 @@ function focusMain() {
   });
 }
 
-// `loadTheme`, `applyTheme`, `toggleTheme`, `updateThemeToggleLabel` moved to `src/ui/theme.js`
-
-// Wrapper functions to maintain compatibility
-const loadTheme = () => loadThemeFromStorage(THEME_KEY);
-const applyTheme = (theme) => applyThemeToDOM(theme, THEME_KEY, themeToggle);
-const toggleTheme = () => toggleThemeInDOM(THEME_KEY, themeToggle);
-
 // Função para atualizar informações do usuário no header
 function updateUserInfo(user) {
   if (!user || !userInfo || !userName || !userRole || !userAvatar) return;
@@ -734,19 +840,16 @@ function updateUserInfo(user) {
   const roleText = user.role === "client" ? "Cliente" : "Operador";
   userRole.textContent = roleText;
   
-  // Atualizar avatar baseado no role
+  // Atualizar avatar com a inicial do nome do usuário
+  const initial = user.name ? user.name.charAt(0).toUpperCase() : "?";
+  userAvatar.textContent = initial;
+
   if (user.role === "operator") {
-    userAvatar.textContent = "🔧";
     userInfo.className = "user-info operator";
-    
-    // Adicionar tooltip com certificação
     const certification = user.certification || "Certificação não informada";
     userInfo.title = `${user.name} (${roleText})\n${certification}`;
   } else {
-    userAvatar.textContent = "🏢";
     userInfo.className = "user-info client";
-    
-    // Adicionar tooltip com empresa
     const company = user.company || "Empresa não informada";
     userInfo.title = `${user.name} (${roleText})\n${company}`;
   }
@@ -769,7 +872,7 @@ function hideUserInfo() {
 
 // ========== INICIALIZAÇÃO DA APLICAÇÃO ==========
 
-document.addEventListener('DOMContentLoaded', () => {
+function initApp() {
   // Atualizar ano no footer
   const yearSpan = document.querySelector('#year');
   if (yearSpan) {
@@ -788,17 +891,13 @@ document.addEventListener('DOMContentLoaded', () => {
     renderLogin();
   }
 
-  // Configurar evento de toggle de tema
-  const themeToggle = document.querySelector('#themeToggle');
-  if (themeToggle) {
-    themeToggle.addEventListener('click', () => {
-      toggleThemeInDOM();
-    });
-  }
+  // Configurar evento de logout (usa o logoutButton do módulo)
+  logoutButton?.removeEventListener('click', handleLogout);
+  logoutButton?.addEventListener('click', handleLogout);
+}
 
-  // Configurar evento de logout
-  const logoutButton = document.querySelector('#logoutButton');
-  if (logoutButton) {
-    logoutButton.addEventListener('click', handleLogout);
-  }
-});
+if (document.readyState !== 'loading') {
+  initApp();
+} else {
+  document.addEventListener('DOMContentLoaded', initApp);
+}

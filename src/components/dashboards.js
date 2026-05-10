@@ -118,6 +118,7 @@ export function renderClientDashboard({
   app.innerHTML = `
     <section class="section-grid" aria-label="Indicadores principais">
       ${metricCard("Solicitações enviadas", metrics.total, "primary")}
+      ${metricCard("Pendentes", metrics.pending, "warning")}
       ${metricCard("Em andamento", metrics.inProgress, "info")}
       ${metricCard("Concluídas", metrics.completed, "success")}
       ${metricCard("Próxima inspeção", metrics.nextInspectionLabel, "neutral")}
@@ -303,6 +304,7 @@ export function renderOperatorDashboard({
     <section class="section-grid" aria-label="Indicadores principais">
       ${metricCard("Missões atribuídas", metrics.assignedToOperator, "primary")}
       ${metricCard("Pendentes", metrics.pending, "warning")}
+      ${metricCard("Em andamento", metrics.inProgress, "info")}
       ${metricCard("Concluídas", metrics.completed, "success")}
       ${metricCard("Próxima agenda", metrics.nextInspectionLabel, "neutral")}
     </section>
